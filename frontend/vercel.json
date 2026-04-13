@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/[...slug].js": {
+    "api/[...slug].mjs": {
       "maxDuration": 30
     }
   },
