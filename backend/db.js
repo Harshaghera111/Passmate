@@ -5,13 +5,13 @@ import { dirname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, 'passmate.db');
+// On Vercel: use /tmp (writable). Locally: use file beside db.js
+const DB_PATH = process.env.VERCEL ? '/tmp/passmate.db' : join(__dirname, 'passmate.db');
 
 export const db = knex({
   client: 'sqlite3',
   connection: { filename: DB_PATH },
   useNullAsDefault: true,
-  // log: { warn: () => {} } // suppress knex warnings
 });
 
 // ─── Schema Migration ────────────────────────────────────────────────────────

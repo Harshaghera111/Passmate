@@ -1,6 +1,12 @@
 // api.ts — typed API client for PassMate backend
-// Uses VITE_API_URL in production, falls back to localhost:3001 in dev
-const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3001') + '/api';
+// Production (Vercel): /api routes to the serverless function on the same domain
+// Local dev: points to localhost:3001 (run backend separately)
+// Custom backend: set VITE_API_URL env var to override
+const BASE_URL = import.meta.env.VITE_API_URL
+  ? import.meta.env.VITE_API_URL + '/api'
+  : import.meta.env.PROD
+    ? '/api'                     // same-domain Vercel serverless
+    : 'http://localhost:3001/api'; // local dev backend
 
 function getToken(): string | null {
   return localStorage.getItem('passmate_token');

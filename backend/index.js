@@ -9,11 +9,17 @@ import passRoutes from './routes/passes.js';
 import userRoutes from './routes/users.js';
 import adminRoutes from './routes/admin.js';
 
-const app = express();
+export const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:4173'],
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://localhost:4173',
+    /\.vercel\.app$/,       // all vercel preview URLs
+    process.env.VITE_FRONTEND_URL, // custom domain if set
+  ].filter(Boolean),
   credentials: true,
 }));
 app.use(express.json());
@@ -59,5 +65,10 @@ async function start() {
   }
 }
 
-start();
+// Only start the HTTP server when running locally (not on Vercel serverless)
+if (!process.env.VERCEL) {
+  start();
+}
+
+export { setupSchema, seed };
 export default app;
