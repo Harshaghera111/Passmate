@@ -1,7 +1,6 @@
 {
   "functions": {
     "api/[...slug].js": {
-      "runtime": "nodejs20.x",
       "maxDuration": 30
     }
   },
