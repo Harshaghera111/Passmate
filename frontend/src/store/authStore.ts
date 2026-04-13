@@ -22,11 +22,14 @@ interface AuthState {
   devOtp: string | null;
   // Actions
   initiateLogin: (usn: string, mobile: string) => Promise<boolean>;
+  initiateRegister: (data: { name: string; usn: string; mobile: string; room?: string }) => Promise<boolean>;
   initiateLoginByRole: (role: string) => Promise<boolean>;
   verifyOtp: (otp: string) => Promise<boolean>;
   logout: () => void;
   // Legacy mock login (kept for dev fallback)
   login: (role: AuthUser['role']) => void;
+  error: string | null;
+  clearError: () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -37,14 +40,32 @@ export const useAuthStore = create<AuthState>()(
       pendingUserId: null,
       pendingMaskedMobile: null,
       devOtp: null,
+      error: null,
+
+      clearError: () => set({ error: null }),
 
       initiateLogin: async (usn: string, mobile: string) => {
         try {
+          set({ error: null });
           const res = await authApi.login(usn, mobile);
           set({ pendingUserId: res.userId, pendingMaskedMobile: res.maskedMobile, devOtp: res.devOtp || null });
           return true;
-        } catch (err) {
+        } catch (err: any) {
           console.error('Login error:', err);
+          set({ error: err.message || 'Login failed' });
+          return false;
+        }
+      },
+
+      initiateRegister: async (data) => {
+        try {
+          set({ error: null });
+          const res = await authApi.register(data);
+          set({ pendingUserId: res.userId, pendingMaskedMobile: res.maskedMobile, devOtp: res.devOtp || null });
+          return true;
+        } catch (err: any) {
+          console.error('Register error:', err);
+          set({ error: err.message || 'Registration failed' });
           return false;
         }
       },

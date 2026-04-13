@@ -25,6 +25,47 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// POST /api/auth/register
+router.post('/register', async (req, res) => {
+  try {
+    const { name, usn, mobile, room } = req.body;
+    if (!name || !usn || !mobile) {
+      return res.status(400).json({ error: 'Name, USN, and mobile number are required' });
+    }
+
+    // Check for duplicates
+    const existingUser = await db('users')
+      .whereRaw('UPPER(usn) = UPPER(?)', [usn])
+      .orWhere('mobile', mobile)
+      .first();
+
+    if (existingUser) {
+      if (existingUser.usn.toUpperCase() === usn.toUpperCase()) {
+        return res.status(409).json({ error: 'USN is already registered.' });
+      }
+      return res.status(409).json({ error: 'Mobile number is already registered.' });
+    }
+
+    // Create new user (using uuid for robust ID generation)
+    const newUser = {
+      id: uuidv4(),
+      name,
+      usn: usn.toUpperCase(),
+      role: 'student',
+      mobile,
+      room: room || null,
+      is_active: true
+    };
+
+    await db('users').insert(newUser);
+
+    // Automatically issue OTP to directly log them in
+    return issueOtp(res, newUser, mobile);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/auth/login-role — demo shortcut
 router.post('/login-role', async (req, res) => {
   try {

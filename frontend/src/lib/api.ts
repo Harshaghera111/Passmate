@@ -62,6 +62,9 @@ export const authApi = {
   login: (usn: string, mobile: string) =>
     request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ usn, mobile }) }),
 
+  register: (data: { name: string; usn: string; mobile: string; room?: string }) =>
+    request<LoginResponse>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
+
   loginByRole: (role: string) =>
     request<LoginResponse>('/auth/login-role', { method: 'POST', body: JSON.stringify({ role }) }),
 

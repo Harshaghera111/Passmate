@@ -20,26 +20,42 @@ const ROLE_ROUTES: Record<string, string> = {
 
 const LoginPage: React.FC = () => {
   const [step, setStep] = useState<1 | 2>(1);
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [name, setName] = useState('');
   const [usn, setUsn] = useState('1DS22CS042');
   const [mobile, setMobile] = useState('9845012345');
+  const [room, setRoom] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  const { initiateLogin, verifyOtp, pendingMaskedMobile, devOtp } = useAuthStore();
+  const { initiateLogin, initiateRegister, verifyOtp, pendingMaskedMobile, devOtp, error: storeError, clearError } = useAuthStore();
   const navigate = useNavigate();
 
   const handleSendOTP = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!mobile) return;
-    setError(null);
+    setValidationError(null);
+    clearError();
     setIsLoading(true);
-    const ok = await initiateLogin(usn || mobile, mobile);
+
+    let ok = false;
+    if (isLoginMode) {
+      ok = await initiateLogin(usn || mobile, mobile);
+      if (!ok) setValidationError('Invalid credentials. Please check your USN and mobile number.');
+    } else {
+      if (!name || !usn) {
+        setIsLoading(false);
+        setValidationError('Name and USN are required for registration.');
+        return;
+      }
+      ok = await initiateRegister({ name, usn, mobile, room });
+      // If storeError catches duplicates, it will be mapped correctly.
+    }
+
     setIsLoading(false);
     if (ok) {
       setStep(2);
-    } else {
-      setError('Invalid credentials. Please check your USN and mobile number.');
     }
   };
 
@@ -47,26 +63,29 @@ const LoginPage: React.FC = () => {
     e.preventDefault();
     const code = otp.join('');
     if (code.length !== 6) return;
-    setError(null);
+    setValidationError(null);
     setIsLoading(true);
     const ok = await verifyOtp(code);
     setIsLoading(false);
     if (ok) {
-      // Navigate based on role from newly updated user state
       const store = useAuthStore.getState();
       const role = store.user?.role || 'student';
       navigate(ROLE_ROUTES[role] || '/student/dashboard');
     } else {
-      setError('Incorrect OTP. Please try again or use bypass code 123456.');
+      setValidationError('Incorrect OTP. Please try again or use bypass code 123456.');
     }
   };
 
   const fillDemo = (role: keyof typeof ROLE_DEFAULTS) => {
     const { usn: u, mobile: m } = ROLE_DEFAULTS[role];
+    setIsLoginMode(true);
     setUsn(u);
     setMobile(m);
-    setError(null);
+    setValidationError(null);
+    clearError();
   };
+
+  const displayError = validationError || storeError;
 
   return (
     <div className="min-h-screen bg-bg-base flex selection:bg-accent-primary selection:text-white">
@@ -134,11 +153,11 @@ const LoginPage: React.FC = () => {
 
           <div className="text-center sm:text-left">
             <h2 className="text-3xl font-bold font-sora text-text-primary">
-              {step === 1 ? 'Welcome back' : 'Verify OTP'}
+              {step === 1 ? (isLoginMode ? 'Welcome back' : 'Create an Account') : 'Verify OTP'}
             </h2>
             <p className="text-text-muted mt-2 text-sm">
               {step === 1
-                ? 'Login with your college credentials'
+                ? (isLoginMode ? 'Login with your college credentials' : 'Register your details to get started')
                 : `OTP sent to +91 ${pendingMaskedMobile || '****'}`}
             </p>
             {step === 2 && devOtp && (
@@ -148,21 +167,30 @@ const LoginPage: React.FC = () => {
             )}
           </div>
 
-          {error && (
+          {displayError && (
             <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               <AlertCircle size={16} className="flex-shrink-0" />
-              {error}
+              {displayError}
             </div>
           )}
 
           <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl shadow-blue-900/5 border border-border">
             {step === 1 ? (
               <form onSubmit={handleSendOTP} className="space-y-5">
+                {!isLoginMode && (
+                  <div className="float-label-group">
+                    <input type="text" id="name" placeholder=" " value={name}
+                      onChange={(e) => setName(e.target.value)} required={!isLoginMode} />
+                    <label htmlFor="name">Full Name</label>
+                  </div>
+                )}
+                
                 <div className="float-label-group">
                   <input type="text" id="usn" placeholder=" " value={usn}
-                    onChange={(e) => setUsn(e.target.value.toUpperCase())} />
+                    onChange={(e) => setUsn(e.target.value.toUpperCase())} required={!isLoginMode} />
                   <label htmlFor="usn">University/College ID (USN)</label>
                 </div>
+                
                 <div className="float-label-group">
                   <input type="tel" id="mobile" placeholder=" " value={mobile}
                     onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
@@ -170,23 +198,39 @@ const LoginPage: React.FC = () => {
                   <label htmlFor="mobile">Registered Mobile Number</label>
                 </div>
 
+                {!isLoginMode && (
+                  <div className="float-label-group">
+                    <input type="text" id="room" placeholder=" " value={room}
+                      onChange={(e) => setRoom(e.target.value)} />
+                    <label htmlFor="room">Room Number (Optional)</label>
+                  </div>
+                )}
+
                 <div className="pt-2">
                   <button type="submit" disabled={isLoading || !mobile || mobile.length < 10}
                     className="btn btn-primary w-full h-12 text-[15px] group disabled:opacity-70 disabled:cursor-not-allowed">
-                    {isLoading ? 'Sending OTP...' : 'Continue with College ID'}
+                    {isLoading ? (isLoginMode ? 'Sending OTP...' : 'Registering...') : (isLoginMode ? 'Continue with College ID' : 'Register & Send OTP')}
                     {!isLoading && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
                   </button>
                 </div>
 
-                <div className="mt-6 pt-5 border-t border-border">
-                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Quick Demo Login</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => fillDemo('student')} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium hover:bg-blue-100 transition-colors border border-blue-200">Student</button>
-                    <button type="button" onClick={() => fillDemo('warden')} className="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full font-medium hover:bg-purple-100 transition-colors border border-purple-200">Warden</button>
-                    <button type="button" onClick={() => fillDemo('guard')} className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full font-medium hover:bg-amber-100 transition-colors border border-amber-200">Guard</button>
-                    <button type="button" onClick={() => fillDemo('admin')} className="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-full font-medium hover:bg-red-100 transition-colors border border-red-200">Admin</button>
-                  </div>
+                <div className="text-center pt-2">
+                  <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setValidationError(null); clearError(); }} className="text-sm font-medium text-text-secondary hover:text-accent-primary transition-colors">
+                    {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
+                  </button>
                 </div>
+
+                {isLoginMode && (
+                  <div className="mt-6 pt-5 border-t border-border">
+                    <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Quick Demo Login</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => fillDemo('student')} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium hover:bg-blue-100 transition-colors border border-blue-200">Student</button>
+                      <button type="button" onClick={() => fillDemo('warden')} className="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full font-medium hover:bg-purple-100 transition-colors border border-purple-200">Warden</button>
+                      <button type="button" onClick={() => fillDemo('guard')} className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full font-medium hover:bg-amber-100 transition-colors border border-amber-200">Guard</button>
+                      <button type="button" onClick={() => fillDemo('admin')} className="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-full font-medium hover:bg-red-100 transition-colors border border-red-200">Admin</button>
+                    </div>
+                  </div>
+                )}
               </form>
             ) : (
               <form onSubmit={handleVerifyOTP} className="space-y-8">
@@ -199,7 +243,7 @@ const LoginPage: React.FC = () => {
                     {isLoading ? 'Verifying...' : 'Verify OTP'}
                   </button>
                   <div className="flex justify-between items-center px-1">
-                    <button type="button" onClick={() => { setStep(1); setOtp(Array(6).fill('')); setError(null); }}
+                    <button type="button" onClick={() => { setStep(1); setOtp(Array(6).fill('')); setValidationError(null); clearError(); }}
                       className="text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
                       Change details
                     </button>
