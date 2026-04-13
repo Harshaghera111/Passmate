@@ -25,16 +25,28 @@ dist-ssr
 
 # Backend — server specific
 server/node_modules/
+backend/node_modules/
 server/passmate.db
 server/passmate.db-shm
 server/passmate.db-wal
+backend/passmate.db
+backend/passmate.db-shm
+backend/passmate.db-wal
 server/.env
+backend/.env
 
-# Environment
+# Environment files (never commit secrets)
 .env
 .env.local
 .env.production
+frontend/.env.local
+frontend/.env.production
 
 # TypeScript build
 *.tsbuildinfo
 tsconfig.tsbuildinfo
+
+# Vite cache
+.vite/
+frontend/.vite/
+

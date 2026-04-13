@@ -1,5 +1,6 @@
 // api.ts — typed API client for PassMate backend
-const BASE_URL = 'http://localhost:3001/api';
+// Uses VITE_API_URL in production, falls back to localhost:3001 in dev
+const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:3001') + '/api';
 
 function getToken(): string | null {
   return localStorage.getItem('passmate_token');
