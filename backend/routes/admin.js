@@ -20,12 +20,15 @@ router.get('/analytics', authenticate, requireRole('admin', 'warden'), async (re
 
     const dailyPassData = await db('gate_passes')
       .whereRaw("created_at >= datetime('now', '-14 days')")
-      .select(db.raw("DATE(created_at) as date"))
-      .count('id as total')
-      .sum(db.raw("CASE WHEN status IN ('approved','active','returned') THEN 1 ELSE 0 END as approved"))
-      .sum(db.raw("CASE WHEN status = 'rejected' THEN 1 ELSE 0 END as rejected"))
+      .select(db.raw(`
+        DATE(created_at) as date,
+        COUNT(id) as total,
+        SUM(CASE WHEN status IN ('approved','active','returned') THEN 1 ELSE 0 END) as approved,
+        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+      `))
       .groupByRaw("DATE(created_at)")
       .orderBy('date');
+
 
     res.json({ kpis: { totalStudents, passesToday, lateReturns, highViolations }, statusBreakdown: coloredStatus, reasonBreakdown, dailyPassData });
   } catch (err) {
