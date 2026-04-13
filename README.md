@@ -61,23 +61,26 @@ cd passmate
 
 ### 2. Install frontend dependencies
 ```bash
+cd frontend
 npm install
+cd ..
 ```
 
 ### 3. Install backend dependencies
 ```bash
-cd server && npm install && cd ..
+cd backend && npm install && cd ..
 ```
 
 ### 4. Start the backend (Port 3001)
 ```bash
-cd server
+cd backend
 node index.js
 ```
 The server auto-creates the SQLite DB and seeds it with demo data.
 
 ### 5. Start the frontend (Port 5173)
 ```bash
+cd frontend
 npm run dev
 ```
 
@@ -102,24 +105,32 @@ Open **http://localhost:5173**
 
 ```
 passmate/
-├── src/                    # React Frontend
-│   ├── components/ui/      # Design system components
-│   ├── layouts/            # AppShell, Sidebar, TopBar, MobileNav
-│   ├── lib/api.ts          # Typed API client
-│   ├── pages/              # Role-scoped page components
-│   │   ├── student/
-│   │   ├── warden/
-│   │   ├── guard/
-│   │   ├── admin/
-│   │   └── parent/
-│   └── store/              # Zustand state + JWT auth
-├── server/                 # Node.js Backend
+├── frontend/               # React Frontend (Vite + TypeScript)
+│   ├── src/
+│   │   ├── components/ui/  # Design system components
+│   │   ├── layouts/        # AppShell, Sidebar, TopBar, MobileNav
+│   │   ├── lib/api.ts      # Typed API client
+│   │   ├── pages/          # Role-scoped page components
+│   │   │   ├── student/
+│   │   │   ├── warden/
+│   │   │   ├── guard/
+│   │   │   ├── admin/
+│   │   │   └── parent/
+│   │   └── store/          # Zustand state + JWT auth
+│   ├── package.json
+│   └── vite.config.ts
+├── backend/                # Node.js Backend (Express + SQLite)
 │   ├── index.js            # Express entry point
 │   ├── db.js               # Knex + SQLite schema
 │   ├── middleware/auth.js  # JWT middleware
 │   ├── routes/             # auth, passes, users, admin
-│   └── utils/seed.js       # DB seeder
-└── package.json
+│   │   ├── auth.js
+│   │   ├── passes.js
+│   │   ├── users.js
+│   │   └── admin.js
+│   ├── utils/seed.js       # DB seeder
+│   └── package.json
+└── README.md
 ```
 
 ---
