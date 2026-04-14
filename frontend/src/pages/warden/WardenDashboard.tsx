@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Clock, ShieldCheck, AlertTriangle, Home, ChevronRight, Loader } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { passApi, GatePass } from '../../lib/api';
+import { passApi, type GatePass } from '../../lib/api';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
 

@@ -94,6 +94,14 @@ export interface GatePass {
   block?: string;
   hostel?: string;
   wardenName?: string;
+  reasonDetail?: string;
+  outTime?: string;
+  expectedReturn?: string;
+  actualReturn?: string;
+  parentApprovedAt?: string;
+  exitScannedAt?: string;
+  createdAt?: string;
+  title?: string;
 }
 
 export interface CreatePassInput {

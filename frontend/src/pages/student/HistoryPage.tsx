@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Search, Filter, Loader } from 'lucide-react';
-import { useAuthStore } from '../../store/authStore';
-import { passApi, GatePass } from '../../lib/api';
+
+import { passApi, type GatePass } from '../../lib/api';
 import StatusPill from '../../components/ui/StatusPill';
 
 type FilterType = 'all' | 'approved' | 'rejected' | 'late';
 
 const HistoryPage: React.FC = () => {
-  const { user } = useAuthStore();
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState('');
   const [passes, setPasses] = useState<GatePass[]>([]);

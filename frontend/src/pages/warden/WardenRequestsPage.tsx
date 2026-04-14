@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Search, Filter, ShieldCheck, X, Loader } from 'lucide-react';
-import { passApi, GatePass } from '../../lib/api';
+import { passApi, type GatePass } from '../../lib/api';
 import StatusPill from '../../components/ui/StatusPill';
 import SidePanel from '../../components/ui/SidePanel';
 

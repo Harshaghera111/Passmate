@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { Plus, Clock, QrCode, ArrowRight, ShieldCheck, User, History as HistoryIcon, Loader } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { passApi, GatePass } from '../../lib/api';
+import { passApi, type GatePass } from '../../lib/api';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
 
@@ -84,7 +84,7 @@ const StudentDashboard: React.FC = () => {
                   
                   <div className="flex items-center gap-2 text-sm font-medium bg-white/10 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/20">
                     <Clock size={16} className="text-blue-200" />
-                    <span>Valid until: {format(new Date(activePass.expected_return || activePass.expectedReturn), 'MMM d, h:mm a')}</span>
+                    <span>Valid until: {format(new Date(activePass.expected_return || activePass.expectedReturn || new Date()), 'MMM d, h:mm a')}</span>
                   </div>
                 </div>
                 
@@ -149,7 +149,7 @@ const StudentDashboard: React.FC = () => {
           {/* Quick Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <StatCard label="Total Passes" value={passes.length} icon={<HistoryIcon size={20} />} color="blue" />
-            <StatCard label="On Time Returns" value={user?.user?.on_time_returns || 10} icon={<ShieldCheck size={20} />} color="green" trend={{value: 83, label: 'success rate'}} />
+            <StatCard label="On Time Returns" value={(user as any)?.on_time_returns || 10} icon={<ShieldCheck size={20} />} color="green" trend={{value: 83, label: 'success rate'}} />
             <div className="col-span-2 sm:col-span-1 border border-border rounded-card bg-bg-muted/50 p-5 flex flex-col justify-center items-center text-center">
               <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2">
                 <User size={18} className="text-text-secondary" />
