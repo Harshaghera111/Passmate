@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Search, Filter, ShieldCheck, X, Loader } from 'lucide-react';
 import { passApi, type GatePass } from '../../lib/api';
-import StatusPill from '../../components/ui/StatusPill';
 import SidePanel from '../../components/ui/SidePanel';
+import toast from 'react-hot-toast';
 
 type TabType = 'pending' | 'approved' | 'rejected' | 'all';
 
@@ -36,9 +36,11 @@ const WardenRequestsPage: React.FC = () => {
     try {
       await passApi.wardenApprove(selectedPass.id);
       setSelectedPass(null);
+      toast.success('Pass approved successfully!');
       fetchPasses();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error(err.message || 'Failed to approve pass');
     } finally {
       setActionLoading(false);
     }
@@ -50,9 +52,11 @@ const WardenRequestsPage: React.FC = () => {
     try {
       await passApi.wardenReject(selectedPass.id);
       setSelectedPass(null);
+      toast.success('Pass request rejected.');
       fetchPasses();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error(err.message || 'Failed to reject pass');
     } finally {
       setActionLoading(false);
     }

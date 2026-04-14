@@ -1,18 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Zap, ScanLine } from 'lucide-react';
+import { passApi } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 const GuardScannerPage: React.FC = () => {
   const navigate = useNavigate();
   const [torch, setTorch] = useState(false);
   
-  // Auto-redirect to verify page after 3 seconds to mock a successful scan
   useEffect(() => {
-    const timer = setTimeout(() => {
-      // Mock passing the pass ID of the active pass
-      navigate('/guard/verify/GP-2024-0415'); 
-    }, 3000);
-    return () => clearTimeout(timer);
+    // For demo purposes, we fetch an actionable pass to simulate a successful scan
+    const findPass = async () => {
+      try {
+        const passes = await passApi.list();
+        const scannablePass = passes.find(p => p.status === 'approved' || p.status === 'active');
+        if (scannablePass) {
+          setTimeout(() => navigate(`/guard/verify/${scannablePass.id}`), 2500);
+        } else {
+           toast.error('No approved passes available to scan.');
+           setTimeout(() => navigate('/guard/home'), 2500);
+        }
+      } catch (err) {
+        toast.error('Failed to initialize scanner');
+      }
+    };
+    findPass();
   }, [navigate]);
 
   return (

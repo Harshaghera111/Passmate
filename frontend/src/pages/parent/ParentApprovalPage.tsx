@@ -1,24 +1,46 @@
-import React, { useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { ShieldCheck, X, Check, MapPin, Clock, Info } from 'lucide-react';
-import { mockPasses } from '../../data/mockData';
+import React, { useState, useEffect } from 'react';
+import { useParams, useLocation } from 'react-router-dom';
+import { ShieldCheck, X, Check, MapPin, Clock, Info, Loader } from 'lucide-react';
+import { passApi, type GatePass } from '../../lib/api';
 import OTPInput from '../../components/ui/OTPInput';
+import toast from 'react-hot-toast';
 
 const ParentApprovalPage: React.FC = () => {
   const { id } = useParams();
-  const pass = mockPasses.find(p => p.id === id) || mockPasses[2]; // fallback for demo
+  const location = useLocation();
+  const token = new URLSearchParams(location.search).get('token') || '';
   
+  const [pass, setPass] = useState<GatePass | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorStatus, setErrorStatus] = useState<string | null>(null);
+
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [action, setAction] = useState<'approve' | 'reject' | null>(null);
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
   const [note, setNote] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
 
+  useEffect(() => {
+    if (!id || !token) {
+      setErrorStatus('Invalid or missing secure token.');
+      setIsLoading(false);
+      return;
+    }
+    
+    passApi.getParentPass(id, token)
+      .then(data => {
+        setPass(data);
+        if (data.parentStatus !== 'pending' && data.parent_status !== 'pending') {
+          setErrorStatus(`Action completed: This pass has already been ${data.parentStatus || data.parent_status}`);
+        }
+      })
+      .catch((err: any) => setErrorStatus(err.message || 'Failed to load request.'))
+      .finally(() => setIsLoading(false));
+  }, [id, token]);
+
   const handleAction = (type: 'approve' | 'reject') => {
     setAction(type);
-    if (type === 'reject') {
-      // Need note for rejection, don't auto-advance
-    } else {
+    if (type !== 'reject') {
       setStep(2);
     }
   };
@@ -28,14 +50,43 @@ const ParentApprovalPage: React.FC = () => {
     setStep(2);
   };
 
-  const handleVerify = () => {
-    if (otp.join('').length !== 6) return;
+  const handleVerify = async () => {
+    if (otp.join('').length !== 6 || !id || !action) return;
     setIsVerifying(true);
-    setTimeout(() => {
-      setIsVerifying(false);
+    
+    try {
+      // We simulate OTP verification success, then actually submit the parent action
+      await passApi.parentApprove(id, token, action, action === 'reject' ? note : undefined);
+      toast.success(action === 'approve' ? 'Successfully approved gate pass!' : 'Gate pass rejected.');
       setStep(3);
-    }, 1000);
+    } catch (err: any) {
+      toast.error(err.message || 'Verification failed.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-bg-base flex items-center justify-center">
+         <Loader className="animate-spin text-accent-primary" size={32} />
+      </div>
+    );
+  }
+
+  if (errorStatus || !pass) {
+    return (
+      <div className="min-h-screen bg-bg-base flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full text-center">
+           <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center text-text-muted mb-4">
+             <Info size={32} />
+           </div>
+           <h2 className="text-xl font-bold font-sora text-text-primary mb-2">Notice</h2>
+           <p className="text-text-secondary text-sm">{errorStatus || 'Pass not found'}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-bg-base flex flex-col items-center justify-center p-4 selection:bg-accent-primary selection:text-white page-enter">
@@ -58,7 +109,7 @@ const ParentApprovalPage: React.FC = () => {
               {/* Student Info */}
               <div className="flex items-center gap-4 bg-bg-muted p-4 rounded-xl">
                 <div className="w-12 h-12 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-lg border-2 border-white shadow-sm">
-                  {pass.studentName[0]}
+                  {pass.studentName?.[0] || 'S'}
                 </div>
                 <div>
                   <h2 className="font-bold text-text-primary leading-tight">{pass.studentName}</h2>
@@ -71,19 +122,19 @@ const ParentApprovalPage: React.FC = () => {
                 <div>
                   <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5"><MapPin size={12}/> Reason / Destination</p>
                   <p className="font-medium text-text-primary text-sm bg-blue-50/50 p-3 rounded-lg border border-blue-100/50">
-                    {pass.reasonDetail}
+                    {pass.reason_detail || pass.reasonDetail}
                   </p>
                 </div>
                 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-bg-muted p-3 rounded-lg">
                     <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5"><Clock size={12}/> Outing Time</p>
-                    <p className="font-semibold text-text-primary text-sm">Today, 2:00 PM</p>
+                    <p className="font-semibold text-text-primary text-sm">{new Date(pass.out_time || pass.outTime || '').toLocaleString(undefined, {weekday:'short', hour:'numeric', minute:'numeric'})}</p>
                   </div>
                   <div className="bg-bg-muted p-3 rounded-lg border border-amber-200/50 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-8 h-8 bg-amber-100 rotate-45 translate-x-4 -translate-y-4" />
                     <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-1 flex items-center gap-1.5">Expected Return</p>
-                    <p className="font-semibold text-text-primary text-sm">Today, 8:00 PM</p>
+                    <p className="font-semibold text-text-primary text-sm">{new Date(pass.expected_return || pass.expectedReturn || '').toLocaleString(undefined, {weekday:'short', hour:'numeric', minute:'numeric'})}</p>
                   </div>
                 </div>
               </div>
@@ -123,42 +174,41 @@ const ParentApprovalPage: React.FC = () => {
               </div>
               
               <p className="text-[10px] text-center text-text-muted flex items-center justify-center gap-1 mt-4">
-                <Info size={10} /> This link is unique and expires in 2 hours.
+                <Info size={10} /> This link is unique and expires soon.
               </p>
             </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-8 animate-in slide-in-from-right-4 duration-300 py-4 text-center">
-              <div>
-                <h2 className="text-xl font-bold font-sora text-text-primary">Verify it's you</h2>
-                <p className="text-sm text-text-muted mt-2 leading-relaxed">
-                  To confirm your {action === 'approve' ? <strong className="text-emerald-600 font-bold">APPROVAL</strong> : <strong className="text-red-500 font-bold">REJECTION</strong>}, please enter the OTP sent to <br/><strong className="text-text-primary">+91 XXXXXX1234</strong>
-                </p>
-              </div>
-
-              <OTPInput value={otp} onChange={setOtp} disabled={isVerifying} />
-
-              <div className="space-y-4">
-                <button 
-                  onClick={handleVerify}
-                  disabled={otp.join('').length !== 6 || isVerifying}
-                  className={`btn w-full h-12 text-[15px] ${action === 'approve' ? 'btn-success' : 'btn-danger'}`}
-                >
-                  {isVerifying ? 'Verifying...' : `Confirm ${action === 'approve' ? 'Approval' : 'Rejection'}`}
-                </button>
-                <div className="flex justify-between items-center px-2">
-                  <button onClick={() => setStep(1)} className="text-xs font-semibold text-text-secondary hover:text-text-primary">← Back</button>
-                  <button className="text-xs font-semibold text-accent-primary">Resend OTP (0:45)</button>
-                </div>
-              </div>
-            </div>
-          )}
+             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300 py-4 text-center">
+               <div>
+                 <h2 className="text-xl font-bold font-sora text-text-primary">Verify it's you</h2>
+                 <p className="text-sm text-text-muted mt-2 leading-relaxed">
+                   To confirm your {action === 'approve' ? <strong className="text-emerald-600 font-bold">APPROVAL</strong> : <strong className="text-red-500 font-bold">REJECTION</strong>}, please enter the OTP sent to your registered mobile.
+                 </p>
+               </div>
+ 
+               <OTPInput value={otp} onChange={setOtp} disabled={isVerifying} />
+ 
+               <div className="space-y-4">
+                 <button 
+                   onClick={handleVerify}
+                   disabled={otp.join('').length !== 6 || isVerifying}
+                   className={`btn w-full h-12 text-[15px] ${action === 'approve' ? 'btn-success' : 'btn-danger'}`}
+                 >
+                   {isVerifying ? <Loader className="animate-spin" size={16}/> : `Confirm ${action === 'approve' ? 'Approval' : 'Rejection'}`}
+                 </button>
+                 <div className="flex justify-between items-center px-2">
+                   <button onClick={() => setStep(1)} className="text-xs font-semibold text-text-secondary hover:text-text-primary">← Back</button>
+                   <button className="text-xs font-semibold text-accent-primary">Resend OTP (0:45)</button>
+                 </div>
+               </div>
+             </div>
+           )}
 
           {step === 3 && (
             <div className="py-8 text-center animate-in zoom-in-95 duration-500 space-y-6">
               <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center flex-shrink-0 relative ${action === 'approve' ? 'bg-emerald-100 text-emerald-500' : 'bg-red-100 text-red-500'}`}>
-                {/* Ping animation effect */}
                 <div className={`absolute inset-0 rounded-full animate-ping opacity-20 ${action === 'approve' ? 'bg-emerald-500' : 'bg-red-500'}`} style={{animationDuration: '2s'}}/>
                 {action === 'approve' ? <Check size={40} strokeWidth={3} /> : <X size={40} strokeWidth={3} />}
               </div>
@@ -178,22 +228,16 @@ const ParentApprovalPage: React.FC = () => {
                 <h3 className="font-semibold text-sm mb-3 text-text-primary border-b border-border pb-2">Summary</h3>
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between"><span className="text-text-muted">Student:</span> <span className="font-medium text-text-primary">{pass.studentName}</span></div>
-                  <div className="flex justify-between"><span className="text-text-muted">Out Time:</span> <span className="font-medium text-text-primary">Today, 2:00 PM</span></div>
                   <div className="flex justify-between"><span className="text-text-muted">Status:</span> 
                     <span className={`font-bold uppercase ${action === 'approve' ? 'text-emerald-600' : 'text-red-500'}`}>
                       {action === 'approve' ? 'Approved by Parent' : 'Rejected by Parent'}
                     </span>
-                  </div>
+                 </div>
                 </div>
               </div>
-
-              <p className="text-[10px] text-text-muted">
-                If this wasn't you, <a href="#" className="text-accent-primary hover:underline font-semibold">contact the warden</a> immediately.
-              </p>
               <p className="text-[11px] font-medium text-text-secondary mt-6">You may now close this window.</p>
             </div>
           )}
-
         </div>
       </div>
     </div>

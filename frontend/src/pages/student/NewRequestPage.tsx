@@ -6,6 +6,7 @@ import { useAuthStore } from '../../store/authStore';
 import { REASONS } from '../../data/mockData';
 import StepperProgress from '../../components/ui/StepperProgress';
 import { passApi } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 const NewRequestPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -40,9 +41,11 @@ const NewRequestPage: React.FC = () => {
         outTime: formData.outTime,
         expectedReturn: formData.expectedReturn,
       });
+      toast.success('Gate pass request submitted successfully!');
       navigate('/student/dashboard');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      toast.error(err.message || 'Failed to submit request');
     } finally {
       setIsSubmitting(false);
     }
@@ -193,9 +196,9 @@ const NewRequestPage: React.FC = () => {
             <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-100">
               <p className="text-sm text-emerald-800 font-medium mb-2">Approval Flow:</p>
               <ol className="list-decimal list-inside text-xs text-emerald-700/80 space-y-1 ml-1">
-                <li>SMS sent to Parent ({formData.parentMobile})</li>
-                <li>Upon parent approval, Warden reviews request</li>
-                <li>QR Code is generated upon final approval</li>
+                <li>Request instantly sent to Warden for review</li>
+                <li>Notification sent to Parent ({formData.parentMobile}) for trust verification</li>
+                <li>QR Code is generated immediately upon Warden approval</li>
               </ol>
             </div>
           </div>

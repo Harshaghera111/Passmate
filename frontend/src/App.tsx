@@ -2,6 +2,8 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './layouts/AppShell';
 
+import { Toaster } from 'react-hot-toast';
+
 // Pages
 import LoginPage from './pages/LoginPage';
 import ParentApprovalPage from './pages/parent/ParentApprovalPage';
@@ -33,8 +35,10 @@ import AdminViolationsPage from './pages/admin/AdminViolationsPage';
 
 const App: React.FC = () => {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
+    <>
+      <Toaster position="top-center" />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
       
       {/* Magic Link Parent Portal (No auth required) */}
       <Route path="/parent/approve/:id" element={<ParentApprovalPage />} />
@@ -72,7 +76,8 @@ const App: React.FC = () => {
       <Route path="/guard/verify/:id" element={<GuardVerifyPage />} />
       <Route path="/guard/invalid" element={<GuardInvalidPassPage />} />
       
-    </Routes>
+      </Routes>
+    </>
   );
 };
 

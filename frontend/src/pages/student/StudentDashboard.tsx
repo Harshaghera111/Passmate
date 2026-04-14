@@ -193,7 +193,10 @@ const StudentDashboard: React.FC = () => {
                       <p className="text-sm font-semibold text-text-primary">{pass.title || pass.reason_detail || pass.reasonDetail}</p>
                     </div>
                     <p className="text-xs text-text-muted mb-2">{format(new Date(pass.created_at || pass.createdAt || new Date()), 'MMM d, h:mm a')}</p>
-                    <StatusPill status={pass.status} size="sm" />
+                    <div className="flex gap-2">
+                      <StatusPill status={pass.status} size="sm" />
+                      <StatusPill status={`parent_${pass.parent_status || pass.parentStatus}` as any} size="sm" pulse={false} />
+                    </div>
                   </div>
                 </div>
               ))}

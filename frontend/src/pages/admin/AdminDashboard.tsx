@@ -1,15 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
-  Users, Ticket, AlertTriangle, ShieldAlert, Download
+  Users, Ticket, AlertTriangle, ShieldAlert, Download, Clock
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell
 } from 'recharts';
 import StatCard from '../../components/ui/StatCard';
-import { 
-  dailyPassData, statusBreakdown, reasonBreakdown, exitHeatmap 
-} from '../../data/mockData';
+import StatusPill from '../../components/ui/StatusPill';
+import { adminApi, passApi, type Analytics, type GatePass } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 const CustomTooltip = ({ active, payload, label }: { active?: boolean, payload?: any[], label?: string }) => {
   if (active && payload && payload.length) {
@@ -29,6 +29,35 @@ const CustomTooltip = ({ active, payload, label }: { active?: boolean, payload?:
 };
 
 const AdminDashboard: React.FC = () => {
+  const [data, setData] = useState<Analytics | null>(null);
+  const [liveStudents, setLiveStudents] = useState<GatePass[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      adminApi.analytics(),
+      passApi.list({ status: 'active' }) // Active = Student is currently outside
+    ])
+    .then(([analyticsRes, passesRes]) => {
+      setData(analyticsRes);
+      setLiveStudents(passesRes);
+    })
+    .catch(err => {
+      console.error(err);
+      toast.error('Failed to load dashboard data');
+    })
+    .finally(() => setIsLoading(false));
+  }, []);
+
+  if (isLoading) {
+    return <div className="p-8 text-center text-text-muted">Loading analytics...</div>;
+  }
+
+  // Fallbacks if data fails somewhat
+  const kpis = data?.kpis || { totalStudents: 0, passesToday: 0, lateReturns: 0, highViolations: 0 };
+  const dailyPassData = data?.dailyPassData || [];
+  const statusBreakdown = data?.statusBreakdown || [];
+  const reasonBreakdown = data?.reasonBreakdown || [];
 
   return (
     <div className="space-y-6 page-enter max-w-7xl mx-auto">
@@ -37,24 +66,24 @@ const AdminDashboard: React.FC = () => {
           <h1 className="text-2xl font-bold font-sora text-text-primary">System Analytics</h1>
           <p className="text-text-muted mt-1 text-sm">Overview of institutional gate pass metrics.</p>
         </div>
-        <button className="btn btn-secondary shadow-sm bg-white">
+        <button className="btn btn-secondary shadow-sm bg-white" onClick={() => toast.success('Exporting report...')}>
           <Download size={16} /> Export Report
         </button>
       </div>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Students" value="4,250" icon={<Users size={20} />} color="blue" />
-        <StatCard label="Passes Today" value="142" icon={<Ticket size={20} />} color="purple" trend={{value: 12, label: 'vs yesterday'}} />
-        <StatCard label="Late Returns (MTD)" value="24" icon={<AlertTriangle size={20} />} color="amber" trend={{value: -5, label: 'vs last month'}} />
-        <StatCard label="High Violations" value="8" icon={<ShieldAlert size={20} />} color="red" />
+        <StatCard label="Total Students" value={kpis.totalStudents} icon={<Users size={20} />} color="blue" />
+        <StatCard label="Passes Today" value={kpis.passesToday} icon={<Ticket size={20} />} color="purple" />
+        <StatCard label="Late Returns" value={kpis.lateReturns} icon={<AlertTriangle size={20} />} color="amber" />
+        <StatCard label="High Violations (>3)" value={kpis.highViolations} icon={<ShieldAlert size={20} />} color="red" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Chart 1: Daily Requests (Line Chart) */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-5 shadow-sm">
-          <h2 className="font-bold text-text-primary font-sora mb-4">Daily Pass Requests (30 Days)</h2>
+          <h2 className="font-bold text-text-primary font-sora mb-4">Daily Pass Requests (Recent)</h2>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dailyPassData} margin={{ top: 5, right: 20, left: -20, bottom: 0 }}>
@@ -69,9 +98,46 @@ const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Live Students Outside Panel */}
+        <div className="bg-white rounded-2xl border border-border p-5 shadow-sm flex flex-col max-h-[380px]">
+          <h2 className="font-bold text-text-primary font-sora mb-4 flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" /> Live Students Outside
+          </h2>
+          <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+             {liveStudents.length === 0 ? (
+               <p className="text-sm text-text-muted text-center pt-8">No students currently outside.</p>
+             ) : liveStudents.map(student => {
+                const isLate = new Date() > new Date(student.expected_return || student.expectedReturn || '');
+                return (
+                   <div key={student.id} className={`p-3 rounded-xl border flex flex-col gap-1 transition-colors ${isLate ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'}`}>
+                      <div className="flex justify-between items-start">
+                         <div className="flex flex-col gap-0.5">
+                           <span className="font-bold text-sm text-text-primary">{student.studentName}</span>
+                           <span className="text-xs font-mono text-text-secondary">{student.usn}</span>
+                         </div>
+                         <StatusPill status={`parent_${student.parent_status || student.parentStatus}` as any} size="sm" pulse={false} />
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-text-muted mt-1">
+                         <Clock size={12} /> Out since: {new Date(student.out_time || student.outTime || '').toLocaleTimeString(undefined, {hour:'numeric', minute:'numeric'})}
+                      </div>
+                      {isLate && (
+                         <div className="text-xs font-bold text-red-600 mt-1 flex items-center gap-1">
+                            <AlertTriangle size={12} /> LATE - Expected back: {new Date(student.expected_return || student.expectedReturn || '').toLocaleTimeString(undefined, {hour:'numeric', minute:'numeric'})}
+                         </div>
+                      )}
+                   </div>
+                );
+             })}
+          </div>
+          <div className="pt-4 mt-2 border-t border-border flex justify-between items-center">
+             <span className="text-xs font-semibold text-text-muted">Total Outside</span>
+             <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-bold">{liveStudents.length}</span>
+          </div>
+        </div>
+
         {/* Chart 2: Status Breakdown (Donut Chart) */}
         <div className="bg-white rounded-2xl border border-border p-5 shadow-sm flex flex-col justify-between">
-          <h2 className="font-bold text-text-primary font-sora mb-4">Pass Status Distribution</h2>
+          <h2 className="font-bold text-text-primary font-sora mb-4">Current System State</h2>
           <div className="h-[220px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -86,7 +152,7 @@ const AdminDashboard: React.FC = () => {
                   stroke="none"
                 >
                   {statusBreakdown.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
+                    <Cell key={`cell-${index}`} fill={entry.color || '#9BA3B2'} />
                   ))}
                 </Pie>
                 <Tooltip content={<CustomTooltip />} />
@@ -107,7 +173,7 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         {/* Chart 3: Reasons (Bar Chart) */}
-        <div className="bg-white rounded-2xl border border-border p-5 shadow-sm">
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-5 shadow-sm">
           <h2 className="font-bold text-text-primary font-sora mb-4">Top Pass Reasons</h2>
           <div className="h-[250px] w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -119,43 +185,6 @@ const AdminDashboard: React.FC = () => {
                 <Bar dataKey="count" name="Total Passes" fill="#2F6FED" radius={[0, 4, 4, 0]} barSize={24} />
               </BarChart>
             </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Chart 4: Exit Heatmap */}
-        <div className="lg:col-span-2 bg-white rounded-2xl border border-border p-5 shadow-sm">
-          <h2 className="font-bold text-text-primary font-sora mb-2">Gate Exit Heatmap</h2>
-          <p className="text-xs text-text-muted mb-6">Identifies peak traffic hours at security gates.</p>
-          
-          <div className="overflow-x-auto pb-2">
-            <div className="min-w-[500px]">
-              <div className="grid grid-cols-8 gap-2 mb-2">
-                <div className="text-xs font-bold text-text-muted uppercase text-right pr-4">Hour</div>
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-                  <div key={d} className="text-xs font-bold text-text-muted text-center uppercase">{d}</div>
-                ))}
-              </div>
-              {exitHeatmap.map((row, i) => (
-                <div key={i} className="grid grid-cols-8 gap-2 mb-2 items-center">
-                  <div className="text-xs font-semibold text-text-secondary text-right pr-4">{row.hour}</div>
-                  {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(day => {
-                    const val = (row as Record<string, any>)[day] as number;
-                    // basic color scale
-                    const opacity = val === 0 ? 0 : val < 4 ? 0.3 : val < 8 ? 0.6 : val < 12 ? 0.8 : 1;
-                    return (
-                       <div 
-                         key={day} 
-                         className="h-8 rounded-md flex items-center justify-center text-xs font-medium text-white transition-all hover:scale-110 cursor-pointer"
-                         style={{ backgroundColor: `rgba(47,111,237,${opacity})`, color: val < 4 ? '#5A6173' : 'white' }}
-                         title={`${val} exits on ${day.toUpperCase()} at ${row.hour}`}
-                       >
-                         {val > 0 ? val : ''}
-                       </div>
-                    );
-                  })}
-                </div>
-              ))}
-            </div>
           </div>
         </div>
 

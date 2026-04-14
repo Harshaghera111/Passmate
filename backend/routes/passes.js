@@ -75,9 +75,9 @@ router.post('/', authenticate, requireRole('student'), async (req, res) => {
     await db('gate_passes').insert({
       id, student_id: req.user.id, reason, reason_detail: reasonDetail,
       out_time: outTime, expected_return: expectedReturn,
-      status: 'pending', parent_status: 'approved',
+      status: 'pending', parent_status: 'pending',
       parent_token: parentToken,
-      parent_approved_at: new Date().toISOString(),
+      parent_approved_at: null,
       qr_code: `${id}::${req.user.id}::${req.user.usn}::pending`,
     });
 
@@ -89,6 +89,21 @@ router.post('/', authenticate, requireRole('student'), async (req, res) => {
 
     const pass = await db('gate_passes').where('id', id).first();
     res.status(201).json(await enrichPass(pass));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/passes/parent/:id — Unauthenticated route for parents
+router.get('/parent/:id', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'Token required' });
+
+    const pass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
+    if (!pass) return res.status(404).json({ error: 'Pass not found or invalid token' });
+
+    res.json(await enrichPass(pass));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

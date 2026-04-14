@@ -119,6 +119,9 @@ export const passApi = {
 
   get: (id: string) => request<GatePass>(`/passes/${id}`),
 
+  getParentPass: (id: string, token: string) => 
+    request<GatePass>(`/passes/parent/${id}?token=${token}`),
+
   create: (data: CreatePassInput) =>
     request<GatePass>('/passes', { method: 'POST', body: JSON.stringify(data) }),
 

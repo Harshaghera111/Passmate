@@ -84,6 +84,7 @@ const HistoryPage: React.FC = () => {
             <div className="space-y-3 flex-1 min-w-0">
               <div className="flex items-center gap-3">
                 <StatusPill status={pass.status} />
+                <StatusPill status={`parent_${pass.parent_status || pass.parentStatus}` as any} size="sm" />
                 {(pass.isLate || pass.is_late) && <span className="bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-badge text-[10px] font-bold uppercase tracking-wider">Late Return</span>}
               </div>
               
