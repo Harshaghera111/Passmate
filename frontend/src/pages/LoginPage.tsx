@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, QrCode, ArrowRight, AlertCircle } from 'lucide-react';
+import { ShieldCheck, QrCode, ArrowRight, AlertCircle, Key } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import OTPInput from '../components/ui/OTPInput';
 
 const ROLE_DEFAULTS = {
   student: { usn: '1DS22CS042', mobile: '9845012345' },
@@ -19,70 +18,72 @@ const ROLE_ROUTES: Record<string, string> = {
 };
 
 const LoginPage: React.FC = () => {
-  const [step, setStep] = useState<1 | 2>(1);
   const [isLoginMode, setIsLoginMode] = useState(true);
+  
+  // Registration fields
   const [name, setName] = useState('');
-  const [usn, setUsn] = useState('1DS22CS042');
-  const [mobile, setMobile] = useState('9845012345');
   const [room, setRoom] = useState('');
-  const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
+  
+  // Common fields
+  const [usn, setUsn] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [password, setPassword] = useState('');
+
   const [isLoading, setIsLoading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const { initiateLogin, initiateRegister, verifyOtp, pendingMaskedMobile, devOtp, error: storeError, clearError } = useAuthStore();
+  const { initiateLogin, initiateRegister, initiateLoginByRole, error: storeError, clearError } = useAuthStore();
   const navigate = useNavigate();
 
-  const handleSendOTP = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!mobile) return;
     setValidationError(null);
     clearError();
     setIsLoading(true);
 
     let ok = false;
     if (isLoginMode) {
-      ok = await initiateLogin(usn || mobile, mobile);
-      if (!ok) setValidationError('Invalid credentials. Please check your USN and mobile number.');
-    } else {
-      if (!name || !usn) {
+      if (!usn && !mobile) {
         setIsLoading(false);
-        setValidationError('Name and USN are required for registration.');
+        setValidationError('USN or Mobile is required to login.');
         return;
       }
-      ok = await initiateRegister({ name, usn, mobile, room });
-      // If storeError catches duplicates, it will be mapped correctly.
+      if (!password) {
+        setIsLoading(false);
+        setValidationError('Password is required.');
+        return;
+      }
+
+      const identifier = usn ? usn : mobile;
+      ok = await initiateLogin(identifier, password);
+    } else {
+      if (!name || (!usn && !mobile) || !password) {
+        setIsLoading(false);
+        setValidationError('Name, identifier (USN or Mobile), and password are required.');
+        return;
+      }
+      ok = await initiateRegister({ name, usn, mobile, room, password });
     }
 
-    setIsLoading(false);
-    if (ok) {
-      setStep(2);
-    }
-  };
-
-  const handleVerifyOTP = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const code = otp.join('');
-    if (code.length !== 6) return;
-    setValidationError(null);
-    setIsLoading(true);
-    const ok = await verifyOtp(code);
     setIsLoading(false);
     if (ok) {
       const store = useAuthStore.getState();
       const role = store.user?.role || 'student';
       navigate(ROLE_ROUTES[role] || '/student/dashboard');
-    } else {
-      setValidationError('Incorrect OTP. Please try again or use bypass code 123456.');
     }
   };
 
-  const fillDemo = (role: keyof typeof ROLE_DEFAULTS) => {
-    const { usn: u, mobile: m } = ROLE_DEFAULTS[role];
-    setIsLoginMode(true);
-    setUsn(u);
-    setMobile(m);
+  const fillDemo = async (role: keyof typeof ROLE_DEFAULTS) => {
+    setIsLoading(true);
     setValidationError(null);
     clearError();
+    const ok = await initiateLoginByRole(role);
+    setIsLoading(false);
+    if (ok) {
+      navigate(ROLE_ROUTES[role] || '/student/dashboard');
+    } else {
+      setValidationError('Demo login failed. Seed data missing?');
+    }
   };
 
   const displayError = validationError || storeError;
@@ -153,18 +154,11 @@ const LoginPage: React.FC = () => {
 
           <div className="text-center sm:text-left">
             <h2 className="text-3xl font-bold font-sora text-text-primary">
-              {step === 1 ? (isLoginMode ? 'Welcome back' : 'Create an Account') : 'Verify OTP'}
+              {isLoginMode ? 'Welcome back' : 'Create an Account'}
             </h2>
             <p className="text-text-muted mt-2 text-sm">
-              {step === 1
-                ? (isLoginMode ? 'Login with your college credentials' : 'Register your details to get started')
-                : `OTP sent to +91 ${pendingMaskedMobile || '****'}`}
+              {isLoginMode ? 'Login with your credentials' : 'Register your details to get started'}
             </p>
-            {step === 2 && devOtp && (
-              <p className="mt-1 text-xs text-emerald-600 font-medium">
-                🔑 Dev OTP: <span className="font-mono font-bold">{devOtp}</span> (or use bypass: 123456)
-              </p>
-            )}
           </div>
 
           {displayError && (
@@ -175,83 +169,70 @@ const LoginPage: React.FC = () => {
           )}
 
           <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl shadow-blue-900/5 border border-border">
-            {step === 1 ? (
-              <form onSubmit={handleSendOTP} className="space-y-5">
-                {!isLoginMode && (
-                  <div className="float-label-group">
-                    <input type="text" id="name" placeholder=" " value={name}
-                      onChange={(e) => setName(e.target.value)} required={!isLoginMode} />
-                    <label htmlFor="name">Full Name</label>
-                  </div>
-                )}
-                
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {!isLoginMode && (
                 <div className="float-label-group">
-                  <input type="text" id="usn" placeholder=" " value={usn}
-                    onChange={(e) => setUsn(e.target.value.toUpperCase())} required={!isLoginMode} />
-                  <label htmlFor="usn">University/College ID (USN)</label>
+                  <input type="text" id="name" placeholder=" " value={name}
+                    onChange={(e) => setName(e.target.value)} required />
+                  <label htmlFor="name">Full Name</label>
                 </div>
-                
+              )}
+              
+              <div className="float-label-group">
+                <input type="text" id="usn" placeholder=" " value={usn}
+                  onChange={(e) => setUsn(e.target.value.toUpperCase())} required={!isLoginMode} />
+                <label htmlFor="usn">University/College ID (USN) or Mobile</label>
+              </div>
+
+              {!isLoginMode && (
                 <div className="float-label-group">
                   <input type="tel" id="mobile" placeholder=" " value={mobile}
                     onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
                     maxLength={10} required />
                   <label htmlFor="mobile">Registered Mobile Number</label>
                 </div>
+              )}
 
-                {!isLoginMode && (
-                  <div className="float-label-group">
-                    <input type="text" id="room" placeholder=" " value={room}
-                      onChange={(e) => setRoom(e.target.value)} />
-                    <label htmlFor="room">Room Number (Optional)</label>
-                  </div>
-                )}
-
-                <div className="pt-2">
-                  <button type="submit" disabled={isLoading || !mobile || mobile.length < 10}
-                    className="btn btn-primary w-full h-12 text-[15px] group disabled:opacity-70 disabled:cursor-not-allowed">
-                    {isLoading ? (isLoginMode ? 'Sending OTP...' : 'Registering...') : (isLoginMode ? 'Continue with College ID' : 'Register & Send OTP')}
-                    {!isLoading && <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />}
-                  </button>
+              {!isLoginMode && (
+                <div className="float-label-group">
+                  <input type="text" id="room" placeholder=" " value={room}
+                    onChange={(e) => setRoom(e.target.value)} />
+                  <label htmlFor="room">Room Number (Optional)</label>
                 </div>
+              )}
 
-                <div className="text-center pt-2">
-                  <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setValidationError(null); clearError(); }} className="text-sm font-medium text-text-secondary hover:text-accent-primary transition-colors">
-                    {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
-                  </button>
-                </div>
+              <div className="float-label-group">
+                <input type="password" id="password" placeholder=" " value={password}
+                  onChange={(e) => setPassword(e.target.value)} required />
+                <label htmlFor="password">Password</label>
+              </div>
 
-                {isLoginMode && (
-                  <div className="mt-6 pt-5 border-t border-border">
-                    <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Quick Demo Login</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" onClick={() => fillDemo('student')} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium hover:bg-blue-100 transition-colors border border-blue-200">Student</button>
-                      <button type="button" onClick={() => fillDemo('warden')} className="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full font-medium hover:bg-purple-100 transition-colors border border-purple-200">Warden</button>
-                      <button type="button" onClick={() => fillDemo('guard')} className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full font-medium hover:bg-amber-100 transition-colors border border-amber-200">Guard</button>
-                      <button type="button" onClick={() => fillDemo('admin')} className="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-full font-medium hover:bg-red-100 transition-colors border border-red-200">Admin</button>
-                    </div>
-                  </div>
-                )}
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyOTP} className="space-y-8">
-                <div className="pt-2">
-                  <OTPInput value={otp} onChange={setOtp} disabled={isLoading} />
-                </div>
-                <div className="space-y-4">
-                  <button type="submit" disabled={isLoading || otp.join('').length !== 6}
-                    className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-70 disabled:cursor-not-allowed">
-                    {isLoading ? 'Verifying...' : 'Verify OTP'}
-                  </button>
-                  <div className="flex justify-between items-center px-1">
-                    <button type="button" onClick={() => { setStep(1); setOtp(Array(6).fill('')); setValidationError(null); clearError(); }}
-                      className="text-sm font-medium text-text-secondary hover:text-text-primary transition-colors">
-                      Change details
-                    </button>
-                    <span className="text-sm font-medium text-text-muted">Resend OTP (0:45)</span>
+              <div className="pt-2">
+                <button type="submit" disabled={isLoading}
+                  className="btn btn-primary w-full h-12 text-[15px] group disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2">
+                  {isLoading ? 'Processing...' : (isLoginMode ? 'Login Securely' : 'Create Account')}
+                  {!isLoading && (isLoginMode ? <Key size={18} /> : <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />)}
+                </button>
+              </div>
+
+              <div className="text-center pt-2">
+                <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setValidationError(null); clearError(); }} className="text-sm font-medium text-text-secondary hover:text-accent-primary transition-colors">
+                  {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
+                </button>
+              </div>
+
+              {isLoginMode && (
+                <div className="mt-6 pt-5 border-t border-border">
+                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Quick Demo Login</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => fillDemo('student')} disabled={isLoading} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium hover:bg-blue-100 transition-colors border border-blue-200">Student</button>
+                    <button type="button" onClick={() => fillDemo('warden')} disabled={isLoading} className="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full font-medium hover:bg-purple-100 transition-colors border border-purple-200">Warden</button>
+                    <button type="button" onClick={() => fillDemo('guard')} disabled={isLoading} className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full font-medium hover:bg-amber-100 transition-colors border border-amber-200">Guard</button>
+                    <button type="button" onClick={() => fillDemo('admin')} disabled={isLoading} className="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-full font-medium hover:bg-red-100 transition-colors border border-red-200">Admin</button>
                   </div>
                 </div>
-              </form>
-            )}
+              )}
+            </form>
           </div>
 
           <p className="text-center text-xs text-text-muted font-medium pb-6 lg:pb-0">

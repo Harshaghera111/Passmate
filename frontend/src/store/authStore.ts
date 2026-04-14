@@ -16,18 +16,11 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null;
   isAuthenticated: boolean;
-  // OTP flow state
-  pendingUserId: string | null;
-  pendingMaskedMobile: string | null;
-  devOtp: string | null;
   // Actions
-  initiateLogin: (usn: string, mobile: string) => Promise<boolean>;
-  initiateRegister: (data: { name: string; usn: string; mobile: string; room?: string }) => Promise<boolean>;
+  initiateLogin: (identifier: string, password?: string) => Promise<boolean>;
+  initiateRegister: (data: { name: string; usn?: string; mobile: string; room?: string; password?: string }) => Promise<boolean>;
   initiateLoginByRole: (role: string) => Promise<boolean>;
-  verifyOtp: (otp: string) => Promise<boolean>;
   logout: () => void;
-  // Legacy mock login (kept for dev fallback)
-  login: (role: AuthUser['role']) => void;
   error: string | null;
   clearError: () => void;
 }
@@ -37,18 +30,26 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       isAuthenticated: false,
-      pendingUserId: null,
-      pendingMaskedMobile: null,
-      devOtp: null,
       error: null,
 
       clearError: () => set({ error: null }),
 
-      initiateLogin: async (usn: string, mobile: string) => {
+      initiateLogin: async (identifier: string, password?: string) => {
         try {
           set({ error: null });
-          const res = await authApi.login(usn, mobile);
-          set({ pendingUserId: res.userId, pendingMaskedMobile: res.maskedMobile, devOtp: res.devOtp || null });
+          const res = await authApi.login(identifier, password || '');
+          localStorage.setItem('passmate_token', res.token);
+          const user: AuthUser = {
+            id: res.user.id,
+            name: res.user.name,
+            role: res.user.role,
+            usn: res.user.usn,
+            hostel: res.user.hostel,
+            hostelId: res.user.hostelId,
+            room: res.user.room,
+            mobile: res.user.mobile,
+          };
+          set({ user, isAuthenticated: true });
           return true;
         } catch (err: any) {
           console.error('Login error:', err);
@@ -61,31 +62,6 @@ export const useAuthStore = create<AuthState>()(
         try {
           set({ error: null });
           const res = await authApi.register(data);
-          set({ pendingUserId: res.userId, pendingMaskedMobile: res.maskedMobile, devOtp: res.devOtp || null });
-          return true;
-        } catch (err: any) {
-          console.error('Register error:', err);
-          set({ error: err.message || 'Registration failed' });
-          return false;
-        }
-      },
-
-      initiateLoginByRole: async (role: string) => {
-        try {
-          const res = await authApi.loginByRole(role);
-          set({ pendingUserId: res.userId, pendingMaskedMobile: res.maskedMobile, devOtp: res.devOtp || null });
-          return true;
-        } catch (err) {
-          console.error('Login by role error:', err);
-          return false;
-        }
-      },
-
-      verifyOtp: async (otp: string) => {
-        const { pendingUserId } = get();
-        if (!pendingUserId) return false;
-        try {
-          const res = await authApi.verifyOtp(pendingUserId, otp);
           localStorage.setItem('passmate_token', res.token);
           const user: AuthUser = {
             id: res.user.id,
@@ -97,28 +73,40 @@ export const useAuthStore = create<AuthState>()(
             room: res.user.room,
             mobile: res.user.mobile,
           };
-          set({ user, isAuthenticated: true, pendingUserId: null, pendingMaskedMobile: null, devOtp: null });
+          set({ user, isAuthenticated: true });
+          return true;
+        } catch (err: any) {
+          console.error('Register error:', err);
+          set({ error: err.message || 'Registration failed' });
+          return false;
+        }
+      },
+
+      initiateLoginByRole: async (role: string) => {
+        try {
+          const res = await authApi.loginByRole(role);
+          localStorage.setItem('passmate_token', res.token);
+          const user: AuthUser = {
+            id: res.user.id,
+            name: res.user.name,
+            role: res.user.role,
+            usn: res.user.usn,
+            hostel: res.user.hostel,
+            hostelId: res.user.hostelId,
+            room: res.user.room,
+            mobile: res.user.mobile,
+          };
+          set({ user, isAuthenticated: true });
           return true;
         } catch (err) {
-          console.error('OTP verify error:', err);
+          console.error('Login by role error:', err);
           return false;
         }
       },
 
       logout: () => {
         localStorage.removeItem('passmate_token');
-        set({ user: null, isAuthenticated: false, pendingUserId: null, pendingMaskedMobile: null, devOtp: null });
-      },
-
-      // Legacy demo login (direct bypass without OTP)
-      login: (role: AuthUser['role']) => {
-        const DEMO_USERS: Record<string, AuthUser> = {
-          student: { id: 's1', name: 'Harsh Verma', role: 'student', usn: '1DS22CS042', hostel: 'Cauvery Boys Hostel', hostelId: 'h1', room: 'A-204', mobile: '9845012345' },
-          warden: { id: 'w1', name: 'Dr. Ramesh Kumar', role: 'warden', hostel: 'Cauvery Boys Hostel', hostelId: 'h1', mobile: '9845001234' },
-          guard: { id: 'g1', name: 'Suresh Babu', role: 'guard', mobile: '9900012345' },
-          admin: { id: 'a1', name: 'System Admin', role: 'admin', mobile: '9000000001' },
-        };
-        set({ user: DEMO_USERS[role] || null, isAuthenticated: true });
+        set({ user: null, isAuthenticated: false });
       },
     }),
     {

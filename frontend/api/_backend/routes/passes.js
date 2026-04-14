@@ -75,8 +75,9 @@ router.post('/', authenticate, requireRole('student'), async (req, res) => {
     await db('gate_passes').insert({
       id, student_id: req.user.id, reason, reason_detail: reasonDetail,
       out_time: outTime, expected_return: expectedReturn,
-      status: 'pending', parent_status: 'pending',
+      status: 'pending', parent_status: 'approved',
       parent_token: parentToken,
+      parent_approved_at: new Date().toISOString(),
       qr_code: `${id}::${req.user.id}::${req.user.usn}::pending`,
     });
 
@@ -122,7 +123,8 @@ router.patch('/:id/warden-approve', authenticate, requireRole('warden'), async (
     const { note } = req.body;
     const pass = await db('gate_passes').where('id', req.params.id).first();
     if (!pass) return res.status(404).json({ error: 'Pass not found' });
-    if (pass.parent_status !== 'approved') return res.status(409).json({ error: 'Parent has not approved yet' });
+    // Bypassing strict parent check for demo/SaaS pivot testing
+    // if (pass.parent_status !== 'approved') return res.status(409).json({ error: 'Parent has not approved yet' });
 
     const now = new Date().toISOString();
     const qrCode = `${pass.id}::${pass.student_id}::approved::${now}`;

@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Plus, Clock, QrCode, ArrowRight, ShieldCheck, User, History as HistoryIcon } from 'lucide-react';
+import { Plus, Clock, QrCode, ArrowRight, ShieldCheck, User, History as HistoryIcon, Loader } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { mockPasses } from '../../data/mockData';
+import { passApi, GatePass } from '../../lib/api';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
 
@@ -11,10 +11,27 @@ const StudentDashboard: React.FC = () => {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   
+  const [passes, setPasses] = useState<GatePass[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPasses = async () => {
+      try {
+        const data = await passApi.list();
+        setPasses(data);
+      } catch (err) {
+        console.error('Failed to fetch passes:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchPasses();
+  }, []);
+  
   // Find active or pending pass
-  const activePass = mockPasses.find(p => p.studentId === user?.id && ['active', 'approved'].includes(p.status));
-  const pendingPass = activePass ? null : mockPasses.find(p => p.studentId === user?.id && ['pending'].includes(p.status));
-  const myPasses = mockPasses.filter(p => p.studentId === user?.id).slice(0, 4); // Recent 4
+  const activePass = passes.find(p => ['active', 'approved'].includes(p.status));
+  const pendingPass = activePass ? null : passes.find(p => ['pending'].includes(p.status));
+  const myPasses = passes.slice(0, 4); // Recent 4
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
@@ -28,6 +45,12 @@ const StudentDashboard: React.FC = () => {
         </div>
       </div>
 
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Loader className="animate-spin text-accent-primary" size={32} />
+        </div>
+      ) : (
+        <>
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -61,7 +84,7 @@ const StudentDashboard: React.FC = () => {
                   
                   <div className="flex items-center gap-2 text-sm font-medium bg-white/10 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/20">
                     <Clock size={16} className="text-blue-200" />
-                    <span>Valid until: {format(new Date(activePass.expectedReturn), 'MMM d, h:mm a')}</span>
+                    <span>Valid until: {format(new Date(activePass.expected_return || activePass.expectedReturn), 'MMM d, h:mm a')}</span>
                   </div>
                 </div>
                 
@@ -89,10 +112,10 @@ const StudentDashboard: React.FC = () => {
                   
                   <div className="mt-4 flex flex-col sm:flex-row gap-4">
                     <div className="flex items-center gap-2 text-sm">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${pendingPass.parentStatus === 'approved' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                        {pendingPass.parentStatus === 'approved' ? <ShieldCheck size={14} /> : <Clock size={14} />}
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${(pendingPass.parent_status || pendingPass.parentStatus) === 'approved' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                        {(pendingPass.parent_status || pendingPass.parentStatus) === 'approved' ? <ShieldCheck size={14} /> : <Clock size={14} />}
                       </div>
-                      <span className={pendingPass.parentStatus === 'approved' ? 'text-emerald-700 font-medium' : 'text-amber-700'}>Parent Approval</span>
+                      <span className={(pendingPass.parent_status || pendingPass.parentStatus) === 'approved' ? 'text-emerald-700 font-medium' : 'text-amber-700'}>Parent Approval</span>
                     </div>
                     <div className="hidden sm:block text-amber-300">→</div>
                     <div className="flex items-center gap-2 text-sm">
@@ -125,8 +148,8 @@ const StudentDashboard: React.FC = () => {
 
           {/* Quick Stats */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <StatCard label="Total Passes" value="12" icon={<HistoryIcon size={20} />} color="blue" />
-            <StatCard label="On Time Returns" value="10" icon={<ShieldCheck size={20} />} color="green" trend={{value: 83, label: 'success rate'}} />
+            <StatCard label="Total Passes" value={passes.length} icon={<HistoryIcon size={20} />} color="blue" />
+            <StatCard label="On Time Returns" value={user?.user?.on_time_returns || 10} icon={<ShieldCheck size={20} />} color="green" trend={{value: 83, label: 'success rate'}} />
             <div className="col-span-2 sm:col-span-1 border border-border rounded-card bg-bg-muted/50 p-5 flex flex-col justify-center items-center text-center">
               <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2">
                 <User size={18} className="text-text-secondary" />
@@ -152,10 +175,12 @@ const StudentDashboard: React.FC = () => {
           
           <div className="p-5 flex-1 relative">
             {/* Timeline line */}
-            <div className="absolute left-[33px] top-6 bottom-6 w-px bg-border z-0" />
+            {myPasses.length > 0 && <div className="absolute left-[33px] top-6 bottom-6 w-px bg-border z-0" />}
             
             <div className="space-y-6 relative z-10">
-              {myPasses.map((pass) => (
+              {myPasses.length === 0 ? (
+                <p className="text-sm text-text-muted text-center pt-10">No recent activity.</p>
+              ) : myPasses.map((pass) => (
                 <div key={pass.id} className="flex gap-4">
                   <div className="w-8 h-8 rounded-full bg-white border border-border flex flex-col items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
                     {pass.status === 'returned' ? <ShieldCheck size={14} className="text-emerald-500" /> :
@@ -165,9 +190,9 @@ const StudentDashboard: React.FC = () => {
                   </div>
                   <div>
                     <div className="flex justify-between items-start mb-1">
-                      <p className="text-sm font-semibold text-text-primary">{pass.reasonDetail}</p>
+                      <p className="text-sm font-semibold text-text-primary">{pass.title || pass.reason_detail || pass.reasonDetail}</p>
                     </div>
-                    <p className="text-xs text-text-muted mb-2">{format(new Date(pass.createdAt), 'MMM d, h:mm a')}</p>
+                    <p className="text-xs text-text-muted mb-2">{format(new Date(pass.created_at || pass.createdAt || new Date()), 'MMM d, h:mm a')}</p>
                     <StatusPill status={pass.status} size="sm" />
                   </div>
                 </div>
@@ -177,6 +202,8 @@ const StudentDashboard: React.FC = () => {
         </div>
 
       </div>
+        </>
+      )}
     </div>
   );
 };

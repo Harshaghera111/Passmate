@@ -5,6 +5,7 @@ import { ArrowRight, ArrowLeft, Check, AlertTriangle, ShieldCheck } from 'lucide
 import { useAuthStore } from '../../store/authStore';
 import { REASONS } from '../../data/mockData';
 import StepperProgress from '../../components/ui/StepperProgress';
+import { passApi } from '../../lib/api';
 
 const NewRequestPage: React.FC = () => {
   const { user } = useAuthStore();
@@ -30,12 +31,21 @@ const NewRequestPage: React.FC = () => {
   const handleNext = () => setStep(s => Math.min(s + 1, 2));
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await passApi.create({
+        reason: formData.reasonType,
+        reasonDetail: formData.reasonDetail,
+        outTime: formData.outTime,
+        expectedReturn: formData.expectedReturn,
+      });
       navigate('/student/dashboard');
-    }, 1500);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

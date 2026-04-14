@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { Search, Filter } from 'lucide-react';
+import { Search, Filter, Loader } from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
-import { mockPasses } from '../../data/mockData';
+import { passApi, GatePass } from '../../lib/api';
 import StatusPill from '../../components/ui/StatusPill';
 
 type FilterType = 'all' | 'approved' | 'rejected' | 'late';
@@ -11,13 +11,28 @@ const HistoryPage: React.FC = () => {
   const { user } = useAuthStore();
   const [filter, setFilter] = useState<FilterType>('all');
   const [search, setSearch] = useState('');
+  const [passes, setPasses] = useState<GatePass[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const passes = mockPasses.filter(p => {
-    if (p.studentId !== user?.id) return false;
+  useEffect(() => {
+    const fetchPasses = async () => {
+      try {
+        const data = await passApi.list();
+        setPasses(data);
+      } catch (err) {
+        console.error('Failed to fetch passes', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchPasses();
+  }, []);
+
+  const filteredPasses = passes.filter(p => {
     if (filter === 'approved' && p.status !== 'approved' && p.status !== 'returned' && p.status !== 'active') return false;
     if (filter === 'rejected' && p.status !== 'rejected') return false;
-    if (filter === 'late' && !p.isLate) return false;
-    if (search && !p.reasonDetail.toLowerCase().includes(search.toLowerCase())) return false;
+    if (filter === 'late' && !(p.isLate || p.is_late)) return false;
+    if (search && !(p.reasonDetail || p.reason_detail || '').toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
 
@@ -61,19 +76,23 @@ const HistoryPage: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {passes.length > 0 ? passes.map(pass => (
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader className="animate-spin text-accent-primary" size={32} />
+          </div>
+        ) : filteredPasses.length > 0 ? filteredPasses.map(pass => (
           <div key={pass.id} className="bg-white rounded-xl p-5 sm:p-6 border border-border shadow-sm card-hover flex flex-col sm:flex-row gap-4 justify-between items-start">
             <div className="space-y-3 flex-1 min-w-0">
               <div className="flex items-center gap-3">
                 <StatusPill status={pass.status} />
-                {pass.isLate && <span className="bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-badge text-[10px] font-bold uppercase tracking-wider">Late Return</span>}
+                {(pass.isLate || pass.is_late) && <span className="bg-red-50 text-red-600 border border-red-200 px-2 py-0.5 rounded-badge text-[10px] font-bold uppercase tracking-wider">Late Return</span>}
               </div>
               
               <div>
-                <h3 className="font-semibold text-text-primary truncate">{pass.reasonDetail}</h3>
+                <h3 className="font-semibold text-text-primary truncate">{pass.reasonDetail || pass.reason_detail}</h3>
                 <p className="text-xs text-text-muted mt-1">
-                  Out: {format(new Date(pass.outTime), 'MMM d, h:mm a')}
-                  {pass.actualReturn ? ` • Return: ${format(new Date(pass.actualReturn), 'MMM d, h:mm a')}` : ''}
+                  Out: {format(new Date(pass.outTime || pass.out_time || new Date()), 'MMM d, h:mm a')}
+                  {(pass.actualReturn || pass.actual_return) ? ` • Return: ${format(new Date(pass.actualReturn || pass.actual_return || new Date()), 'MMM d, h:mm a')}` : ''}
                 </p>
               </div>
             </div>

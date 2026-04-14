@@ -35,10 +35,8 @@ async function request<T>(
 
 export interface LoginResponse {
   success: boolean;
-  userId: string;
-  maskedMobile: string;
-  devOtp?: string;
-  message: string;
+  token: string;
+  user: AuthUser;
 }
 
 export interface AuthUser {
@@ -52,24 +50,17 @@ export interface AuthUser {
   hostelId: string | null;
 }
 
-export interface VerifyResponse {
-  success: boolean;
-  token: string;
-  user: AuthUser;
-}
+
 
 export const authApi = {
-  login: (usn: string, mobile: string) =>
-    request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ usn, mobile }) }),
+  login: (usn: string, password?: string) =>
+    request<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify({ usn, password }) }),
 
-  register: (data: { name: string; usn: string; mobile: string; room?: string }) =>
+  register: (data: { name: string; usn?: string; mobile: string; room?: string; password?: string }) =>
     request<LoginResponse>('/auth/register', { method: 'POST', body: JSON.stringify(data) }),
 
   loginByRole: (role: string) =>
     request<LoginResponse>('/auth/login-role', { method: 'POST', body: JSON.stringify({ role }) }),
-
-  verifyOtp: (userId: string, otp: string) =>
-    request<VerifyResponse>('/auth/verify-otp', { method: 'POST', body: JSON.stringify({ userId, otp }) }),
 
   me: () => request<AuthUser>('/auth/me'),
 };
