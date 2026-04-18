@@ -12,7 +12,7 @@ const AVATAR_COLORS: Record<string, string> = {
 
 const TopBar: React.FC = () => {
   const { user } = useAuthStore();
-  const initials = user?.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'PM';
+  const initials = user?.name?.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() || 'PM';
   const gradClass = AVATAR_COLORS[user?.role || 'student'];
 
   return (

@@ -1,119 +1,106 @@
+// authStore.ts — Zustand store backed by Firebase Auth + Firestore
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { authApi, type AuthUser as ApiAuthUser } from '../lib/api';
-
-export interface AuthUser {
-  id: string;
-  name: string;
-  role: 'student' | 'warden' | 'guard' | 'admin';
-  usn?: string | null;
-  hostel?: string | null;
-  hostelId?: string | null;
-  room?: string | null;
-  mobile?: string;
-}
+import type { ConfirmationResult } from 'firebase/auth';
+import {
+  setupRecaptcha, sendOtp, verifyOtp, logoutUser,
+  onAuthChange, fetchUserProfile,
+  type AppUser, type UserRole,
+} from '../services/authService';
 
 interface AuthState {
-  user: AuthUser | null;
+  user: AppUser | null;
   isAuthenticated: boolean;
-  // Actions
-  initiateLogin: (identifier: string, password?: string) => Promise<boolean>;
-  initiateRegister: (data: { name: string; usn?: string; mobile: string; room?: string; password?: string }) => Promise<boolean>;
-  initiateLoginByRole: (role: string) => Promise<boolean>;
-  logout: () => void;
   error: string | null;
+
+  // OTP flow
+  confirmationResult: ConfirmationResult | null;
+  otpSent: boolean;
+  otpLoading: boolean;
+
+  // Actions
+  initRecaptcha: (containerId: string) => void;
+  sendOtpCode: (phone: string) => Promise<boolean>;
+  confirmOtpCode: (code: string, role: UserRole, extra?: { name?: string; usn?: string; room?: string; hostel?: string }) => Promise<boolean>;
+  logout: () => Promise<void>;
+  setUser: (user: AppUser | null) => void;
   clearError: () => void;
+  initAuthListener: () => () => void;
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       isAuthenticated: false,
       error: null,
+      confirmationResult: null,
+      otpSent: false,
+      otpLoading: false,
 
       clearError: () => set({ error: null }),
 
-      initiateLogin: async (identifier: string, password?: string) => {
+      setUser: (user) => set({ user, isAuthenticated: !!user }),
+
+      initRecaptcha: (containerId: string) => {
+        setupRecaptcha(containerId);
+      },
+
+      sendOtpCode: async (phone: string) => {
+        set({ otpLoading: true, error: null });
         try {
-          set({ error: null });
-          const res = await authApi.login(identifier, password || '');
-          localStorage.setItem('passmate_token', res.token);
-          const user: AuthUser = {
-            id: res.user.id,
-            name: res.user.name,
-            role: res.user.role,
-            usn: res.user.usn,
-            hostel: res.user.hostel,
-            hostelId: res.user.hostelId,
-            room: res.user.room,
-            mobile: res.user.mobile,
-          };
-          set({ user, isAuthenticated: true });
+          const confirmation = await sendOtp(phone);
+          set({ confirmationResult: confirmation, otpSent: true, otpLoading: false });
           return true;
         } catch (err: any) {
-          console.error('Login error:', err);
-          set({ error: err.message || 'Login failed' });
+          set({ error: err.message || 'Failed to send OTP', otpLoading: false });
           return false;
         }
       },
 
-      initiateRegister: async (data) => {
+      confirmOtpCode: async (code, role, extra) => {
+        const { confirmationResult } = get();
+        if (!confirmationResult) {
+          set({ error: 'No OTP session. Please resend.' });
+          return false;
+        }
+        set({ otpLoading: true, error: null });
         try {
-          set({ error: null });
-          const res = await authApi.register(data);
-          localStorage.setItem('passmate_token', res.token);
-          const user: AuthUser = {
-            id: res.user.id,
-            name: res.user.name,
-            role: res.user.role,
-            usn: res.user.usn,
-            hostel: res.user.hostel,
-            hostelId: res.user.hostelId,
-            room: res.user.room,
-            mobile: res.user.mobile,
-          };
-          set({ user, isAuthenticated: true });
+          const user = await verifyOtp(confirmationResult, code, role, extra);
+          set({ user, isAuthenticated: true, otpLoading: false, otpSent: false, confirmationResult: null });
           return true;
         } catch (err: any) {
-          console.error('Register error:', err);
-          set({ error: err.message || 'Registration failed' });
+          set({ error: err.message || 'Invalid OTP', otpLoading: false });
           return false;
         }
       },
 
-      initiateLoginByRole: async (role: string) => {
-        try {
-          const res = await authApi.loginByRole(role);
-          localStorage.setItem('passmate_token', res.token);
-          const user: AuthUser = {
-            id: res.user.id,
-            name: res.user.name,
-            role: res.user.role,
-            usn: res.user.usn,
-            hostel: res.user.hostel,
-            hostelId: res.user.hostelId,
-            room: res.user.room,
-            mobile: res.user.mobile,
-          };
-          set({ user, isAuthenticated: true });
-          return true;
-        } catch (err) {
-          console.error('Login by role error:', err);
-          return false;
-        }
+      logout: async () => {
+        await logoutUser();
+        set({ user: null, isAuthenticated: false, otpSent: false, confirmationResult: null });
       },
 
-      logout: () => {
-        localStorage.removeItem('passmate_token');
-        set({ user: null, isAuthenticated: false });
+      initAuthListener: () => {
+        return onAuthChange(async (fbUser) => {
+          if (fbUser) {
+            const profile = await fetchUserProfile(fbUser.uid);
+            if (profile) set({ user: profile, isAuthenticated: true });
+          } else {
+            set({ user: null, isAuthenticated: false });
+          }
+        });
       },
     }),
     {
-      name: 'passmate-auth',
-      partialize: (state) => ({ user: state.user, isAuthenticated: state.isAuthenticated }),
+      name: 'passmate-auth-v2',
+      // Don't persist confirmationResult (not serializable)
+      partialize: (state) => ({
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+      }),
     }
   )
 );
 
-export type { ApiAuthUser };
+// Re-export for backward compat with pages that import AuthUser type
+export type { AppUser as AuthUser };

@@ -1,243 +1,160 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
-import { ShieldCheck, X, Check, MapPin, Clock, Info, Loader } from 'lucide-react';
-import { passApi, type GatePass } from '../../lib/api';
-import OTPInput from '../../components/ui/OTPInput';
+import React, { useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { format } from 'date-fns';
+import { CheckCircle2, XCircle, Clock, ShieldCheck, Loader, AlertCircle } from 'lucide-react';
+import { getPass, parentApprove, type GatePass } from '../../services/passService';
 import toast from 'react-hot-toast';
 
 const ParentApprovalPage: React.FC = () => {
-  const { id } = useParams();
-  const location = useLocation();
-  const token = new URLSearchParams(location.search).get('token') || '';
-  
-  const [pass, setPass] = useState<GatePass | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorStatus, setErrorStatus] = useState<string | null>(null);
+  const { id: paramId } = useParams();
+  const [searchParams] = useSearchParams();
+  const passId = paramId || searchParams.get('id') || '';
 
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [action, setAction] = useState<'approve' | 'reject' | null>(null);
-  const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
-  const [note, setNote] = useState('');
-  const [isVerifying, setIsVerifying] = useState(false);
+  const [pass, setPass]         = useState<GatePass | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [actionDone, setActionDone] = useState(false);
+  const [decision, setDecision] = useState<'approved' | 'rejected' | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    if (!id || !token) {
-      setErrorStatus('Invalid or missing secure token.');
-      setIsLoading(false);
-      return;
-    }
-    
-    passApi.getParentPass(id, token)
-      .then(data => {
-        setPass(data);
-        if (data.parentStatus !== 'pending' && data.parent_status !== 'pending') {
-          setErrorStatus(`Action completed: This pass has already been ${data.parentStatus || data.parent_status}`);
-        }
-      })
-      .catch((err: any) => setErrorStatus(err.message || 'Failed to load request.'))
+    if (!passId) { setIsLoading(false); return; }
+    getPass(passId)
+      .then(p => setPass(p))
+      .catch(() => {})
       .finally(() => setIsLoading(false));
-  }, [id, token]);
+  }, [passId]);
 
-  const handleAction = (type: 'approve' | 'reject') => {
-    setAction(type);
-    if (type !== 'reject') {
-      setStep(2);
-    }
-  };
-
-  const submitRejection = () => {
-    if (!note) return;
-    setStep(2);
-  };
-
-  const handleVerify = async () => {
-    if (otp.join('').length !== 6 || !id || !action) return;
-    setIsVerifying(true);
-    
+  const handleDecision = async (approve: boolean) => {
+    if (!passId || !pass) return;
+    setActionLoading(true);
     try {
-      // We simulate OTP verification success, then actually submit the parent action
-      await passApi.parentApprove(id, token, action, action === 'reject' ? note : undefined);
-      toast.success(action === 'approve' ? 'Successfully approved gate pass!' : 'Gate pass rejected.');
-      setStep(3);
+      await parentApprove(passId, approve);
+      setDecision(approve ? 'approved' : 'rejected');
+      setActionDone(true);
+      toast.success(approve ? 'Pass approved by parent!' : 'Pass rejected by parent.');
     } catch (err: any) {
-      toast.error(err.message || 'Verification failed.');
+      toast.error(err.message || 'Failed to submit decision');
     } finally {
-      setIsVerifying(false);
+      setActionLoading(false);
     }
   };
 
   if (isLoading) {
     return (
       <div className="min-h-screen bg-bg-base flex items-center justify-center">
-         <Loader className="animate-spin text-accent-primary" size={32} />
+        <Loader className="animate-spin text-accent-primary" size={40} />
       </div>
     );
   }
 
-  if (errorStatus || !pass) {
+  if (!pass) {
     return (
-      <div className="min-h-screen bg-bg-base flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-2xl shadow-xl max-w-sm w-full text-center">
-           <div className="w-16 h-16 mx-auto bg-gray-100 rounded-full flex items-center justify-center text-text-muted mb-4">
-             <Info size={32} />
-           </div>
-           <h2 className="text-xl font-bold font-sora text-text-primary mb-2">Notice</h2>
-           <p className="text-text-secondary text-sm">{errorStatus || 'Pass not found'}</p>
-        </div>
+      <div className="min-h-screen bg-bg-base flex flex-col items-center justify-center p-6 text-center">
+        <AlertCircle size={64} className="text-red-500 mb-4" />
+        <h1 className="text-2xl font-bold text-text-primary">Pass Not Found</h1>
+        <p className="text-text-muted mt-2">The approval link may be invalid or expired.</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-bg-base flex flex-col items-center justify-center p-4 selection:bg-accent-primary selection:text-white page-enter">
-      {/* Centered focused card */}
-      <div className="w-full max-w-[420px] bg-white rounded-2xl shadow-xl shadow-blue-900/5 border border-border overflow-hidden">
-        
+    <div className="min-h-screen bg-bg-base flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl shadow-blue-900/10 border border-border overflow-hidden">
+
         {/* Header */}
-        <div className="bg-gradient-hero p-5 text-white text-center rounded-b-2xl shadow-md z-10 relative">
-          <div className="w-10 h-10 mx-auto bg-white/20 backdrop-blur-md rounded-xl flex items-center justify-center mb-3">
-            <ShieldCheck size={20} className="text-white" />
+        <div className="bg-gradient-hero p-8 text-white text-center relative overflow-hidden">
+          <div className="absolute inset-0 bg-white/5 rounded-full blur-3xl scale-150" />
+          <div className="relative z-10">
+            <ShieldCheck size={48} className="mx-auto mb-3 drop-shadow-md" />
+            <h1 className="text-2xl font-black font-sora">Parent Approval</h1>
+            <p className="text-blue-100 text-sm mt-1">PassMate Gate Pass Request</p>
           </div>
-          <h1 className="text-xl font-bold font-sora">Secure Parent Portal</h1>
-          <p className="text-blue-100 text-xs mt-1 font-medium">Verify & Approve Gate Pass</p>
         </div>
 
-        <div className="p-6">
-          {step === 1 && (
-            <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-300">
-              
-              {/* Student Info */}
-              <div className="flex items-center gap-4 bg-bg-muted p-4 rounded-xl">
-                <div className="w-12 h-12 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center font-bold text-lg border-2 border-white shadow-sm">
-                  {pass.studentName?.[0] || 'S'}
-                </div>
-                <div>
-                  <h2 className="font-bold text-text-primary leading-tight">{pass.studentName}</h2>
-                  <p className="text-xs text-text-muted mt-0.5">{pass.usn} • {pass.room}</p>
-                </div>
-              </div>
+        <div className="p-6 space-y-5">
+          {/* Student Info */}
+          <div className="flex items-center gap-4 bg-bg-muted p-4 rounded-2xl border border-border">
+            <div className="w-14 h-14 bg-gradient-hero text-white rounded-full flex items-center justify-center font-black text-2xl shadow-inner shadow-black/20">
+              {pass.studentName?.[0] ?? 'S'}
+            </div>
+            <div>
+              <p className="font-bold text-text-primary text-lg">{pass.studentName}</p>
+              <p className="text-text-muted text-xs font-mono">{pass.usn} · Room {pass.room}</p>
+            </div>
+          </div>
 
-              {/* Request Details */}
-              <div className="space-y-4">
-                <div>
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5"><MapPin size={12}/> Reason / Destination</p>
-                  <p className="font-medium text-text-primary text-sm bg-blue-50/50 p-3 rounded-lg border border-blue-100/50">
-                    {pass.reason_detail || pass.reasonDetail}
-                  </p>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-bg-muted p-3 rounded-lg">
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted mb-1 flex items-center gap-1.5"><Clock size={12}/> Outing Time</p>
-                    <p className="font-semibold text-text-primary text-sm">{new Date(pass.out_time || pass.outTime || '').toLocaleString(undefined, {weekday:'short', hour:'numeric', minute:'numeric'})}</p>
-                  </div>
-                  <div className="bg-bg-muted p-3 rounded-lg border border-amber-200/50 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-8 h-8 bg-amber-100 rotate-45 translate-x-4 -translate-y-4" />
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700 mb-1 flex items-center gap-1.5">Expected Return</p>
-                    <p className="font-semibold text-text-primary text-sm">{new Date(pass.expected_return || pass.expectedReturn || '').toLocaleString(undefined, {weekday:'short', hour:'numeric', minute:'numeric'})}</p>
-                  </div>
-                </div>
+          {/* Pass Details */}
+          <div className="bg-bg-muted rounded-2xl border border-border p-4 space-y-3 text-sm">
+            <div className="flex items-center gap-3">
+              <Clock size={16} className="text-text-muted flex-shrink-0" />
+              <div>
+                <p className="text-xs text-text-muted">Out Time</p>
+                <p className="font-semibold text-text-primary">{format(pass.outTime, 'MMM d, h:mm a')}</p>
               </div>
+            </div>
+            <div className="border-t border-border" />
+            <div className="flex items-center gap-3">
+              <Clock size={16} className="text-amber-500 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-text-muted">Expected Return</p>
+                <p className="font-semibold text-text-primary">{format(pass.expectedReturn, 'MMM d, h:mm a')}</p>
+              </div>
+            </div>
+            <div className="border-t border-border" />
+            <div>
+              <p className="text-xs text-text-muted mb-1">Reason</p>
+              <p className="font-semibold text-text-primary">{pass.reasonDetail}</p>
+            </div>
+          </div>
 
-              {/* Action Buttons */}
-              <div className="pt-4 border-t border-border">
-                {action === 'reject' ? (
-                  <div className="space-y-3 animate-in fade-in zoom-in-95 duration-200">
-                    <textarea 
-                      value={note}
-                      onChange={(e) => setNote(e.target.value)}
-                      placeholder="Please provide a reason for rejection..."
-                      className="w-full text-sm border-2 border-red-200 focus:border-red-500 rounded-lg p-3 resize-none outline-none focus:shadow-[0_0_0_3px_rgba(239,68,68,0.1)]"
-                      rows={3}
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={() => setAction(null)} className="btn btn-ghost flex-1">Cancel</button>
-                      <button onClick={submitRejection} disabled={!note} className="btn btn-danger flex-1">Confirm Reject</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => handleAction('reject')}
-                      className="btn btn-danger-outline flex-1 group"
-                    >
-                      <X size={18} className="group-hover:scale-110 transition-transform" /> Reject
-                    </button>
-                    <button 
-                      onClick={() => handleAction('approve')}
-                      className="btn btn-success flex-1 shadow-lg shadow-emerald-500/20 group hover:-translate-y-0.5 transition-all"
-                    >
-                      <Check size={18} className="group-hover:scale-110 transition-transform" /> Approve
-                    </button>
-                  </div>
-                )}
-              </div>
-              
-              <p className="text-[10px] text-center text-text-muted flex items-center justify-center gap-1 mt-4">
-                <Info size={10} /> This link is unique and expires soon.
+          {/* Action / Result */}
+          {actionDone ? (
+            <div className={`rounded-2xl p-6 text-center border-2 ${decision === 'approved' ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+              {decision === 'approved'
+                ? <CheckCircle2 size={48} className="text-emerald-500 mx-auto mb-3" />
+                : <XCircle size={48} className="text-red-500 mx-auto mb-3" />}
+              <h2 className="text-xl font-black font-sora text-text-primary mb-1">
+                {decision === 'approved' ? 'Pass Approved!' : 'Pass Rejected'}
+              </h2>
+              <p className="text-sm text-text-muted">
+                {decision === 'approved'
+                  ? "The warden will receive this decision. Your ward's safety is our priority."
+                  : 'The hostel has been notified of your rejection.'}
               </p>
             </div>
-          )}
-
-          {step === 2 && (
-             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300 py-4 text-center">
-               <div>
-                 <h2 className="text-xl font-bold font-sora text-text-primary">Verify it's you</h2>
-                 <p className="text-sm text-text-muted mt-2 leading-relaxed">
-                   To confirm your {action === 'approve' ? <strong className="text-emerald-600 font-bold">APPROVAL</strong> : <strong className="text-red-500 font-bold">REJECTION</strong>}, please enter the OTP sent to your registered mobile.
-                 </p>
-               </div>
- 
-               <OTPInput value={otp} onChange={setOtp} disabled={isVerifying} />
- 
-               <div className="space-y-4">
-                 <button 
-                   onClick={handleVerify}
-                   disabled={otp.join('').length !== 6 || isVerifying}
-                   className={`btn w-full h-12 text-[15px] ${action === 'approve' ? 'btn-success' : 'btn-danger'}`}
-                 >
-                   {isVerifying ? <Loader className="animate-spin" size={16}/> : `Confirm ${action === 'approve' ? 'Approval' : 'Rejection'}`}
-                 </button>
-                 <div className="flex justify-between items-center px-2">
-                   <button onClick={() => setStep(1)} className="text-xs font-semibold text-text-secondary hover:text-text-primary">← Back</button>
-                   <button className="text-xs font-semibold text-accent-primary">Resend OTP (0:45)</button>
-                 </div>
-               </div>
-             </div>
-           )}
-
-          {step === 3 && (
-            <div className="py-8 text-center animate-in zoom-in-95 duration-500 space-y-6">
-              <div className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center flex-shrink-0 relative ${action === 'approve' ? 'bg-emerald-100 text-emerald-500' : 'bg-red-100 text-red-500'}`}>
-                <div className={`absolute inset-0 rounded-full animate-ping opacity-20 ${action === 'approve' ? 'bg-emerald-500' : 'bg-red-500'}`} style={{animationDuration: '2s'}}/>
-                {action === 'approve' ? <Check size={40} strokeWidth={3} /> : <X size={40} strokeWidth={3} />}
-              </div>
-              
-              <div>
-                <h2 className="text-2xl font-bold font-sora text-text-primary">
-                  {action === 'approve' ? 'Approval Confirmed!' : 'Request Rejected'}
-                </h2>
-                <p className="text-text-muted mt-2 text-sm max-w-[260px] mx-auto">
-                  {action === 'approve' 
-                    ? `You have successfully approved ${pass.studentName}'s gate pass request.`
-                    : `You have denied ${pass.studentName}'s gate pass request.`}
-                </p>
-              </div>
-
-              <div className="bg-bg-muted p-4 rounded-xl text-left border border-border">
-                <h3 className="font-semibold text-sm mb-3 text-text-primary border-b border-border pb-2">Summary</h3>
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between"><span className="text-text-muted">Student:</span> <span className="font-medium text-text-primary">{pass.studentName}</span></div>
-                  <div className="flex justify-between"><span className="text-text-muted">Status:</span> 
-                    <span className={`font-bold uppercase ${action === 'approve' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {action === 'approve' ? 'Approved by Parent' : 'Rejected by Parent'}
-                    </span>
-                 </div>
-                </div>
-              </div>
-              <p className="text-[11px] font-medium text-text-secondary mt-6">You may now close this window.</p>
+          ) : pass.parentApproved !== null ? (
+            <div className={`rounded-2xl p-5 text-center border-2 ${pass.parentApproved ? 'bg-emerald-50 border-emerald-200' : 'bg-red-50 border-red-200'}`}>
+              {pass.parentApproved
+                ? <CheckCircle2 size={32} className="text-emerald-500 mx-auto mb-2" />
+                : <XCircle size={32} className="text-red-500 mx-auto mb-2" />}
+              <p className="font-semibold text-text-primary">
+                You have already {pass.parentApproved ? 'approved' : 'rejected'} this pass.
+              </p>
+            </div>
+          ) : (
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleDecision(false)}
+                disabled={actionLoading}
+                className="flex-1 py-4 rounded-2xl bg-red-50 text-red-600 font-black text-lg border-2 border-red-200 hover:bg-red-100 transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {actionLoading ? <Loader className="animate-spin" size={20} /> : <XCircle size={20} />}
+                Reject
+              </button>
+              <button
+                onClick={() => handleDecision(true)}
+                disabled={actionLoading}
+                className="flex-1 py-4 rounded-2xl bg-emerald-500 text-white font-black text-lg border-2 border-emerald-500 hover:bg-emerald-600 transition-colors shadow-lg shadow-emerald-500/25 disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {actionLoading ? <Loader className="animate-spin" size={20} /> : <CheckCircle2 size={20} />}
+                Approve
+              </button>
             </div>
           )}
+
+          <p className="text-center text-xs text-text-muted">
+            Powered by <span className="font-semibold text-accent-primary">PassMate</span> · Secure Hostel Gate Pass System
+          </p>
         </div>
       </div>
     </div>

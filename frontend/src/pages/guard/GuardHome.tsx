@@ -19,7 +19,7 @@ const GuardHome: React.FC = () => {
       <div className="flex justify-between items-center mb-8 bg-white p-4 rounded-2xl border border-border shadow-sm">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-amber-100 text-amber-700 rounded-full flex flex-shrink-0 items-center justify-center font-bold text-lg border-2 border-amber-200">
-            {user?.name[0]}
+            {user?.name?.[0] ?? 'G'}
           </div>
           <div>
             <h1 className="font-bold text-text-primary text-lg leading-tight">{user?.name}</h1>

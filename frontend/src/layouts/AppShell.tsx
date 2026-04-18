@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Outlet, Navigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
@@ -6,7 +6,14 @@ import MobileNav from './MobileNav';
 import { useAuthStore } from '../store/authStore';
 
 const AppShell: React.FC = () => {
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, initAuthListener } = useAuthStore();
+
+  // Subscribe to Firebase auth state on mount
+  useEffect(() => {
+    const unsubscribe = initAuthListener();
+    return unsubscribe;
+  }, [initAuthListener]);
+
   if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
 
   return (

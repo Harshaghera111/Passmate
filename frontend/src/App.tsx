@@ -1,10 +1,10 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import AppShell from './layouts/AppShell';
-
 import { Toaster } from 'react-hot-toast';
+import AppShell from './layouts/AppShell';
+import ProtectedRoute from './routes/ProtectedRoute';
 
-// Pages
+// Public pages
 import LoginPage from './pages/LoginPage';
 import ParentApprovalPage from './pages/parent/ParentApprovalPage';
 
@@ -38,44 +38,120 @@ const App: React.FC = () => {
     <>
       <Toaster position="top-center" />
       <Routes>
+
+        {/* ── Public routes ── */}
         <Route path="/login" element={<LoginPage />} />
-      
-      {/* Magic Link Parent Portal (No auth required) */}
-      <Route path="/parent/approve/:id" element={<ParentApprovalPage />} />
-      <Route path="/parent/approve" element={<ParentApprovalPage />} />
+        <Route path="/login/:role" element={<LoginPage />} />
 
-      {/* Auth'd Routes */}
-      <Route element={<AppShell />}>
-        {/* Student Routes */}
-        <Route path="/student/dashboard" element={<StudentDashboard />} />
-        <Route path="/student/request/new" element={<NewRequestPage />} />
-        <Route path="/student/history" element={<HistoryPage />} />
-        
-        {/* Warden Routes */}
-        <Route path="/warden/dashboard" element={<WardenDashboard />} />
-        <Route path="/warden/requests" element={<WardenRequestsPage />} />
-        <Route path="/warden/students" element={<WardenStudentsPage />} />
-        <Route path="/warden/emergency" element={<WardenEmergencyPage />} />
-        
-        {/* Admin Routes */}
-        <Route path="/admin/dashboard" element={<AdminDashboard />} />
-        <Route path="/admin/users" element={<AdminUsersPage />} />
-        <Route path="/admin/settings" element={<AdminSettingsPage />} />
-        <Route path="/admin/logs" element={<AdminLogsPage />} />
-        <Route path="/admin/violations" element={<AdminViolationsPage />} />
+        {/* Parent magic-link approval (no auth required) */}
+        <Route path="/parent/approve/:id" element={<ParentApprovalPage />} />
+        <Route path="/parent/approve"     element={<ParentApprovalPage />} />
 
-        {/* Global redirect - will be captured by AppShell if no user */}
-        <Route path="/" element={<Navigate to="/student/dashboard" replace />} />
-      </Route>
+        {/* ── Authenticated + role-protected routes ── */}
+        <Route element={<AppShell />}>
 
-      {/* Full-screen specific routes outside AppShell */}
-      <Route path="/student/pass/:id" element={<PassViewPage />} />
-      <Route path="/guard/home" element={<GuardHome />} />
-      <Route path="/guard/scan" element={<GuardHome />} />
-      <Route path="/guard/scanner" element={<GuardScannerPage />} />
-      <Route path="/guard/verify/:id" element={<GuardVerifyPage />} />
-      <Route path="/guard/invalid" element={<GuardInvalidPassPage />} />
-      
+          {/* Student */}
+          <Route path="/student/dashboard" element={
+            <ProtectedRoute allowedRoles={['student']}>
+              <StudentDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/student/request/new" element={
+            <ProtectedRoute allowedRoles={['student']}>
+              <NewRequestPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/student/history" element={
+            <ProtectedRoute allowedRoles={['student']}>
+              <HistoryPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Warden */}
+          <Route path="/warden/dashboard" element={
+            <ProtectedRoute allowedRoles={['warden', 'admin']}>
+              <WardenDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/warden/requests" element={
+            <ProtectedRoute allowedRoles={['warden', 'admin']}>
+              <WardenRequestsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/warden/students" element={
+            <ProtectedRoute allowedRoles={['warden', 'admin']}>
+              <WardenStudentsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/warden/emergency" element={
+            <ProtectedRoute allowedRoles={['warden', 'admin']}>
+              <WardenEmergencyPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Admin */}
+          <Route path="/admin/dashboard" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminDashboard />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/users" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminUsersPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/settings" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminSettingsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/logs" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminLogsPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/violations" element={
+            <ProtectedRoute allowedRoles={['admin']}>
+              <AdminViolationsPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Catch-all redirect */}
+          <Route path="/" element={<Navigate to="/student/dashboard" replace />} />
+        </Route>
+
+        {/* ── Full-screen routes (outside AppShell) ── */}
+        <Route path="/student/pass/:id" element={
+          <ProtectedRoute allowedRoles={['student']}>
+            <PassViewPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/guard/home" element={
+          <ProtectedRoute allowedRoles={['guard', 'admin']}>
+            <GuardHome />
+          </ProtectedRoute>
+        } />
+        <Route path="/guard/scan" element={
+          <ProtectedRoute allowedRoles={['guard', 'admin']}>
+            <GuardHome />
+          </ProtectedRoute>
+        } />
+        <Route path="/guard/scanner" element={
+          <ProtectedRoute allowedRoles={['guard', 'admin']}>
+            <GuardScannerPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/guard/verify/:id" element={
+          <ProtectedRoute allowedRoles={['guard', 'admin']}>
+            <GuardVerifyPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/guard/invalid" element={
+          <ProtectedRoute allowedRoles={['guard', 'admin']}>
+            <GuardInvalidPassPage />
+          </ProtectedRoute>
+        } />
+
       </Routes>
     </>
   );

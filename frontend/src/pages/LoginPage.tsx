@@ -1,96 +1,72 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ShieldCheck, QrCode, ArrowRight, AlertCircle, Key } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ShieldCheck, QrCode, AlertCircle, Phone, KeyRound, ChevronLeft } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import type { UserRole } from '../services/authService';
+import { ROLE_HOME } from '../routes/ProtectedRoute';
 
-const ROLE_DEFAULTS = {
-  student: { usn: '1DS22CS042', mobile: '9845012345' },
-  warden:  { usn: '',          mobile: '9845001234' },
-  guard:   { usn: '',          mobile: '9900012345' },
-  admin:   { usn: '',          mobile: '9000000001' },
-};
+// ─── Test phone numbers (for demo / development) ────────────────────────────
+// Student : +91 98450 12345  (OTP: 123456 in emulator)
+// Parent  : +91 98765 43210  (OTP: 123456 in emulator)
+// Warden  : +91 98450 01234  (OTP: 123456 in emulator)
+// Guard   : +91 99000 12345  (OTP: 123456 in emulator)
+// Admin   : +91 90000 00001  (OTP: 123456 in emulator)
+// ─────────────────────────────────────────────────────────────────────────────
 
-const ROLE_ROUTES: Record<string, string> = {
-  student: '/student/dashboard',
-  warden: '/warden/dashboard',
-  guard: '/guard/scan',
-  admin: '/admin/dashboard',
+const ROLE_LABELS: Record<UserRole, string> = {
+  student: 'Student',
+  parent:  'Parent / Guardian',
+  warden:  'Warden',
+  guard:   'Security Guard',
+  admin:   'Admin',
 };
 
 const LoginPage: React.FC = () => {
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  
-  // Registration fields
-  const [name, setName] = useState('');
-  const [room, setRoom] = useState('');
-  
-  // Common fields
-  const [usn, setUsn] = useState('');
-  const [mobile, setMobile] = useState('');
-  const [password, setPassword] = useState('');
+  const [params] = useSearchParams();
+  const defaultRole = (params.get('role') as UserRole) || 'student';
 
-  const [isLoading, setIsLoading] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const [role, setRole]       = useState<UserRole>(defaultRole);
+  const [phone, setPhone]     = useState('');
+  const [otp, setOtp]         = useState('');
+  const [name, setName]       = useState('');
 
-  const { initiateLogin, initiateRegister, initiateLoginByRole, error: storeError, clearError } = useAuthStore();
+  const recaptchaRef = useRef<HTMLDivElement>(null);
+  const { 
+    initRecaptcha, sendOtpCode, confirmOtpCode, otpSent, otpLoading, 
+    error, clearError, isAuthenticated, user,
+  } = useAuthStore();
+
   const navigate = useNavigate();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Redirect if already authed
+  useEffect(() => {
+    if (isAuthenticated && user) navigate(ROLE_HOME[user.role] ?? '/student/dashboard', { replace: true });
+  }, [isAuthenticated, user, navigate]);
+
+  // Setup reCAPTCHA on mount
+  useEffect(() => {
+    initRecaptcha('recaptcha-container');
+  }, [initRecaptcha]);
+
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    setValidationError(null);
     clearError();
-    setIsLoading(true);
-
-    let ok = false;
-    if (isLoginMode) {
-      if (!usn && !mobile) {
-        setIsLoading(false);
-        setValidationError('USN or Mobile is required to login.');
-        return;
-      }
-      if (!password) {
-        setIsLoading(false);
-        setValidationError('Password is required.');
-        return;
-      }
-
-      const identifier = usn ? usn : mobile;
-      ok = await initiateLogin(identifier, password);
-    } else {
-      if (!name || (!usn && !mobile) || !password) {
-        setIsLoading(false);
-        setValidationError('Name, identifier (USN or Mobile), and password are required.');
-        return;
-      }
-      ok = await initiateRegister({ name, usn, mobile, room, password });
-    }
-
-    setIsLoading(false);
-    if (ok) {
-      const store = useAuthStore.getState();
-      const role = store.user?.role || 'student';
-      navigate(ROLE_ROUTES[role] || '/student/dashboard');
-    }
+    if (!phone || phone.replace(/\D/g, '').length < 10) return;
+    await sendOtpCode(phone.replace(/\D/g, ''));
   };
 
-  const fillDemo = async (role: keyof typeof ROLE_DEFAULTS) => {
-    setIsLoading(true);
-    setValidationError(null);
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
     clearError();
-    const ok = await initiateLoginByRole(role);
-    setIsLoading(false);
-    if (ok) {
-      navigate(ROLE_ROUTES[role] || '/student/dashboard');
-    } else {
-      setValidationError('Demo login failed. Seed data missing?');
-    }
+    const ok = await confirmOtpCode(otp, role, {
+      name: name.trim() || undefined,
+    });
+    if (ok) navigate(ROLE_HOME[role] ?? '/student/dashboard', { replace: true });
   };
-
-  const displayError = validationError || storeError;
 
   return (
     <div className="min-h-screen bg-bg-base flex selection:bg-accent-primary selection:text-white">
-      {/* Left panel */}
+      {/* Left hero panel */}
       <div className="hidden lg:flex w-[45%] bg-gradient-hero p-12 text-white flex-col justify-between relative overflow-hidden">
         <div className="absolute top-0 left-0 w-[800px] h-[800px] bg-white/5 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
         <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[#10B981]/10 rounded-full blur-3xl translate-x-1/3 translate-y-1/3" />
@@ -102,35 +78,32 @@ const LoginPage: React.FC = () => {
           <span className="text-2xl font-bold font-sora">PassMate</span>
         </div>
 
-        <div className="relative z-10 space-y-8 mt-12 mb-auto">
+        <div className="relative z-10 space-y-6 my-auto">
           <h1 className="text-5xl font-extrabold font-sora leading-[1.1] tracking-tight">
             Smart Hostel<br />Gate Pass<br />Management
           </h1>
-          <p className="text-blue-100 text-lg font-medium max-w-md leading-relaxed">
+          <p className="text-blue-100 text-lg max-w-md leading-relaxed">
             Paperless approvals. Real-time tracking. Instant QR exits.<br />
             Built for modern Indian campuses.
           </p>
 
-          <div className="float-card mt-12 relative w-full max-w-sm">
-            <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-5 rounded-2xl shadow-2xl">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-emerald-400/20 rounded-full flex items-center justify-center flex-shrink-0 border border-emerald-400/30">
-                  <ShieldCheck size={24} className="text-emerald-300" />
-                </div>
-                <div>
-                  <p className="text-white font-bold font-sora">Pass Approved</p>
-                  <p className="text-blue-100 text-xs mt-0.5">Warden Dr. Ramesh</p>
-                </div>
-                <div className="ml-auto bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider border border-emerald-500/30">
-                  Now Active
-                </div>
+          <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-5 rounded-2xl shadow-2xl w-full max-w-sm">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-emerald-400/20 rounded-full flex items-center justify-center flex-shrink-0 border border-emerald-400/30">
+                <ShieldCheck size={24} className="text-emerald-300" />
+              </div>
+              <div>
+                <p className="text-white font-bold font-sora">Pass Approved</p>
+                <p className="text-blue-100 text-xs mt-0.5">Verified at gate · 2:45 PM</p>
+              </div>
+              <div className="ml-auto bg-emerald-500/20 text-emerald-300 text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider border border-emerald-500/30">
+                Active
               </div>
             </div>
-            <div className="absolute -inset-1 blur-2xl bg-white/10 rounded-3xl -z-10" />
           </div>
         </div>
 
-        <div className="relative z-10 flex items-center gap-4 text-sm text-blue-200 mt-12 font-medium">
+        <div className="relative z-10 flex items-center gap-4 text-sm text-blue-200 font-medium">
           <div className="flex -space-x-2">
             {[1, 2, 3].map(i => (
               <div key={i} className="w-8 h-8 rounded-full bg-white/20 border-2 border-[#2F6FED] backdrop-blur-sm" />
@@ -140,105 +113,148 @@ const LoginPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right panel */}
+      {/* Right form panel */}
       <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 md:px-24 relative overflow-hidden">
-        <div className="lg:hidden absolute top-0 left-0 w-full h-64 bg-gradient-hero -z-10 rounded-b-[40px] opacity-10" />
+        <div className="w-full max-w-md mx-auto space-y-8 page-enter">
 
-        <div className="w-full max-w-md mx-auto space-y-8 page-enter relative z-10">
-          <div className="lg:hidden flex items-center justify-center gap-3 mb-12">
+          {/* Logo (mobile) */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
             <div className="w-12 h-12 bg-gradient-hero rounded-xl shadow-lg flex items-center justify-center">
               <QrCode size={28} className="text-white" />
             </div>
-            <span className="text-3xl font-extrabold text-text-primary font-sora tracking-tight mt-1">PassMate</span>
+            <span className="text-3xl font-extrabold text-text-primary font-sora tracking-tight">PassMate</span>
           </div>
 
-          <div className="text-center sm:text-left">
+          {/* Role selector */}
+          <div className="flex flex-wrap gap-2 justify-center lg:justify-start">
+            {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([r, label]) => (
+              <button
+                key={r}
+                onClick={() => { setRole(r); clearError(); }}
+                disabled={otpSent}
+                className={[
+                  'px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
+                  role === r
+                    ? 'bg-accent-primary text-white border-accent-primary'
+                    : 'bg-white text-text-secondary border-border hover:bg-bg-muted',
+                  otpSent ? 'opacity-50 cursor-not-allowed pointer-events-none' : '',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div>
             <h2 className="text-3xl font-bold font-sora text-text-primary">
-              {isLoginMode ? 'Welcome back' : 'Create an Account'}
+              {otpSent ? 'Enter OTP' : 'Secure Login'}
             </h2>
-            <p className="text-text-muted mt-2 text-sm">
-              {isLoginMode ? 'Login with your credentials' : 'Register your details to get started'}
+            <p className="text-text-muted mt-1 text-sm">
+              {otpSent
+                ? `Code sent to +91 ${phone}. Valid for 2 minutes.`
+                : 'Login as ' + ROLE_LABELS[role] + ' using your registered mobile number.'}
             </p>
           </div>
 
-          {displayError && (
+          {error && (
             <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               <AlertCircle size={16} className="flex-shrink-0" />
-              {displayError}
+              {error}
             </div>
           )}
 
           <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl shadow-blue-900/5 border border-border">
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {!isLoginMode && (
+            {!otpSent ? (
+              /* ── Step 1: Enter phone ── */
+              <form onSubmit={handleSendOtp} className="space-y-5">
+                {role === 'student' && (
+                  <div className="float-label-group">
+                    <input
+                      type="text" placeholder=" " value={name}
+                      onChange={e => setName(e.target.value)}
+                    />
+                    <label>Full Name (optional for first-time)</label>
+                  </div>
+                )}
+
                 <div className="float-label-group">
-                  <input type="text" id="name" placeholder=" " value={name}
-                    onChange={(e) => setName(e.target.value)} required />
-                  <label htmlFor="name">Full Name</label>
-                </div>
-              )}
-              
-              <div className="float-label-group">
-                <input type="text" id="usn" placeholder=" " value={usn}
-                  onChange={(e) => setUsn(e.target.value.toUpperCase())} required={!isLoginMode} />
-                <label htmlFor="usn">University/College ID (USN) or Mobile</label>
-              </div>
-
-              {!isLoginMode && (
-                <div className="float-label-group">
-                  <input type="tel" id="mobile" placeholder=" " value={mobile}
-                    onChange={(e) => setMobile(e.target.value.replace(/\D/g, ''))}
-                    maxLength={10} required />
-                  <label htmlFor="mobile">Registered Mobile Number</label>
-                </div>
-              )}
-
-              {!isLoginMode && (
-                <div className="float-label-group">
-                  <input type="text" id="room" placeholder=" " value={room}
-                    onChange={(e) => setRoom(e.target.value)} />
-                  <label htmlFor="room">Room Number (Optional)</label>
-                </div>
-              )}
-
-              <div className="float-label-group">
-                <input type="password" id="password" placeholder=" " value={password}
-                  onChange={(e) => setPassword(e.target.value)} required />
-                <label htmlFor="password">Password</label>
-              </div>
-
-              <div className="pt-2">
-                <button type="submit" disabled={isLoading}
-                  className="btn btn-primary w-full h-12 text-[15px] group disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center gap-2">
-                  {isLoading ? 'Processing...' : (isLoginMode ? 'Login Securely' : 'Create Account')}
-                  {!isLoading && (isLoginMode ? <Key size={18} /> : <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />)}
-                </button>
-              </div>
-
-              <div className="text-center pt-2">
-                <button type="button" onClick={() => { setIsLoginMode(!isLoginMode); setValidationError(null); clearError(); }} className="text-sm font-medium text-text-secondary hover:text-accent-primary transition-colors">
-                  {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
-                </button>
-              </div>
-
-              {isLoginMode && (
-                <div className="mt-6 pt-5 border-t border-border">
-                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Quick Demo Login</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button type="button" onClick={() => fillDemo('student')} disabled={isLoading} className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full font-medium hover:bg-blue-100 transition-colors border border-blue-200">Student</button>
-                    <button type="button" onClick={() => fillDemo('warden')} disabled={isLoading} className="text-xs bg-purple-50 text-purple-700 px-3 py-1.5 rounded-full font-medium hover:bg-purple-100 transition-colors border border-purple-200">Warden</button>
-                    <button type="button" onClick={() => fillDemo('guard')} disabled={isLoading} className="text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-full font-medium hover:bg-amber-100 transition-colors border border-amber-200">Guard</button>
-                    <button type="button" onClick={() => fillDemo('admin')} disabled={isLoading} className="text-xs bg-red-50 text-red-700 px-3 py-1.5 rounded-full font-medium hover:bg-red-100 transition-colors border border-red-200">Admin</button>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm font-medium select-none">+91</span>
+                    <input
+                      type="tel"
+                      placeholder=" "
+                      value={phone}
+                      onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      className="!pl-12"
+                      required
+                    />
+                    <label style={{ left: '3rem' }}>Mobile Number</label>
                   </div>
                 </div>
-              )}
-            </form>
+
+                {/* invisible reCAPTCHA anchor */}
+                <div id="recaptcha-container" ref={recaptchaRef} />
+
+                <button
+                  type="submit"
+                  disabled={otpLoading || phone.length < 10}
+                  className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                >
+                  {otpLoading ? 'Sending OTP...' : <><Phone size={16} /> Send OTP</>}
+                </button>
+              </form>
+            ) : (
+              /* ── Step 2: Enter OTP ── */
+              <form onSubmit={handleVerifyOtp} className="space-y-5">
+                <div className="flex gap-1 items-center text-sm text-text-secondary mb-2">
+                  <button type="button" onClick={() => { useAuthStore.getState().clearError(); useAuthStore.setState({ otpSent: false }); }} className="flex items-center gap-1 hover:text-accent-primary transition-colors">
+                    <ChevronLeft size={14} /> Change number
+                  </button>
+                </div>
+
+                <div className="float-label-group">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder=" "
+                    value={otp}
+                    onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    maxLength={6}
+                    autoFocus
+                    required
+                  />
+                  <label>6-digit OTP</label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={otpLoading || otp.length < 6}
+                  className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+                >
+                  {otpLoading ? 'Verifying...' : <><KeyRound size={16} /> Verify & Login</>}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSendOtp}
+                  disabled={otpLoading}
+                  className="w-full text-center text-sm text-text-secondary hover:text-accent-primary transition-colors"
+                >
+                  Resend OTP
+                </button>
+              </form>
+            )}
           </div>
 
-          <p className="text-center text-xs text-text-muted font-medium pb-6 lg:pb-0">
-            Login credentials provided by your hostel warden. Need help?{' '}
-            <a href="#" className="text-accent-primary hover:underline">Contact Admin</a>
-          </p>
+          {/* Demo seed hint */}
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-700 space-y-1">
+            <p className="font-bold uppercase tracking-wider text-[10px] text-blue-500 mb-2">Demo Credentials</p>
+            <p>📱 Student: <span className="font-mono">+91 98450 12345</span></p>
+            <p>👪 Parent: <span className="font-mono">+91 98765 43210</span></p>
+            <p>🛡️ Warden: <span className="font-mono">+91 98450 01234</span></p>
+            <p>🔒 Guard: <span className="font-mono">+91 99000 12345</span></p>
+            <p className="text-blue-400 italic mt-2">OTP: 123456 (Firebase Auth Emulator / Test Numbers)</p>
+          </div>
         </div>
       </div>
     </div>
