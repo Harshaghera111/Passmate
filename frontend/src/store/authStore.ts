@@ -3,7 +3,8 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ConfirmationResult } from 'firebase/auth';
 import {
-  setupRecaptcha, sendOtp, verifyOtp, logoutUser,
+  initRecaptcha, cleanupRecaptcha,
+  sendOTP, verifyOTP, logoutUser,
   onAuthChange, fetchUserProfile,
   type AppUser, type UserRole,
 } from '../services/authService';
@@ -13,14 +14,16 @@ interface AuthState {
   isAuthenticated: boolean;
   error: string | null;
 
-  // OTP flow
+  // OTP flow state
   confirmationResult: ConfirmationResult | null;
   otpSent: boolean;
   otpLoading: boolean;
 
   // Actions
-  initRecaptcha: (containerId: string) => void;
-  sendOtpCode: (phone: string) => Promise<boolean>;
+  setupRecaptcha: (containerId: string) => void;
+  teardownRecaptcha: () => void;
+  resetOtpState: () => void;
+  sendOtpCode: (phone: string, role: UserRole) => Promise<boolean>;
   confirmOtpCode: (code: string, role: UserRole, extra?: { name?: string; usn?: string; room?: string; hostel?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   setUser: (user: AppUser | null) => void;
@@ -39,17 +42,24 @@ export const useAuthStore = create<AuthState>()(
       otpLoading: false,
 
       clearError: () => set({ error: null }),
-
       setUser: (user) => set({ user, isAuthenticated: !!user }),
 
-      initRecaptcha: (containerId: string) => {
-        setupRecaptcha(containerId);
+      setupRecaptcha: (containerId: string) => {
+        initRecaptcha(containerId);
       },
 
-      sendOtpCode: async (phone: string) => {
+      teardownRecaptcha: () => {
+        cleanupRecaptcha();
+      },
+
+      resetOtpState: () => {
+        set({ otpSent: false, confirmationResult: null, error: null });
+      },
+
+      sendOtpCode: async (phone: string, _role: UserRole) => {
         set({ otpLoading: true, error: null });
         try {
-          const confirmation = await sendOtp(phone);
+          const confirmation = await sendOTP(phone);
           set({ confirmationResult: confirmation, otpSent: true, otpLoading: false });
           return true;
         } catch (err: any) {
@@ -61,13 +71,20 @@ export const useAuthStore = create<AuthState>()(
       confirmOtpCode: async (code, role, extra) => {
         const { confirmationResult } = get();
         if (!confirmationResult) {
-          set({ error: 'No OTP session. Please resend.' });
+          set({ error: 'Session expired. Please resend OTP.' });
           return false;
         }
         set({ otpLoading: true, error: null });
         try {
-          const user = await verifyOtp(confirmationResult, code, role, extra);
-          set({ user, isAuthenticated: true, otpLoading: false, otpSent: false, confirmationResult: null });
+          const user = await verifyOTP(confirmationResult, code, role, extra);
+          set({
+            user,
+            isAuthenticated: true,
+            otpLoading: false,
+            otpSent: false,
+            confirmationResult: null,
+            error: null,
+          });
           return true;
         } catch (err: any) {
           set({ error: err.message || 'Invalid OTP', otpLoading: false });
@@ -77,7 +94,7 @@ export const useAuthStore = create<AuthState>()(
 
       logout: async () => {
         await logoutUser();
-        set({ user: null, isAuthenticated: false, otpSent: false, confirmationResult: null });
+        set({ user: null, isAuthenticated: false, otpSent: false, confirmationResult: null, error: null });
       },
 
       initAuthListener: () => {
@@ -86,14 +103,16 @@ export const useAuthStore = create<AuthState>()(
             const profile = await fetchUserProfile(fbUser.uid);
             if (profile) set({ user: profile, isAuthenticated: true });
           } else {
-            set({ user: null, isAuthenticated: false });
+            // Only clear if we were authenticated (avoids race on initial load)
+            const { isAuthenticated } = get();
+            if (isAuthenticated) set({ user: null, isAuthenticated: false });
           }
         });
       },
     }),
     {
       name: 'passmate-auth-v2',
-      // Don't persist confirmationResult (not serializable)
+      // ConfirmationResult is not JSON-serializable — exclude it
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,
@@ -102,5 +121,4 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
-// Re-export for backward compat with pages that import AuthUser type
 export type { AppUser as AuthUser };

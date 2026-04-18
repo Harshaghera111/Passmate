@@ -1,17 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ShieldCheck, QrCode, AlertCircle, Phone, KeyRound, ChevronLeft } from 'lucide-react';
+import { ShieldCheck, QrCode, AlertCircle, Phone, KeyRound, ChevronLeft, RefreshCw } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import type { UserRole } from '../services/authService';
 import { ROLE_HOME } from '../routes/ProtectedRoute';
 
-// ─── Test phone numbers (for demo / development) ────────────────────────────
-// Student : +91 98450 12345  (OTP: 123456 in emulator)
-// Parent  : +91 98765 43210  (OTP: 123456 in emulator)
-// Warden  : +91 98450 01234  (OTP: 123456 in emulator)
-// Guard   : +91 99000 12345  (OTP: 123456 in emulator)
-// Admin   : +91 90000 00001  (OTP: 123456 in emulator)
+// ─── Demo / test phone number ─────────────────────────────────────────────────
+// Add this number in Firebase Console → Authentication → Sign-in method
+// → Phone → Test phone numbers → +917620981982 / OTP: 123456
 // ─────────────────────────────────────────────────────────────────────────────
+const DEMO_PHONE = '7620981982';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   student: 'Student',
@@ -21,52 +19,97 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin:   'Admin',
 };
 
+const RECAPTCHA_ID = 'recaptcha-container';
+
 const LoginPage: React.FC = () => {
-  const [params] = useSearchParams();
-  const defaultRole = (params.get('role') as UserRole) || 'student';
+  const [searchParams] = useSearchParams();
+  const defaultRole = (searchParams.get('role') as UserRole) || 'student';
 
-  const [role, setRole]       = useState<UserRole>(defaultRole);
-  const [phone, setPhone]     = useState('');
-  const [otp, setOtp]         = useState('');
-  const [name, setName]       = useState('');
+  const [role, setRole]   = useState<UserRole>(defaultRole);
+  const [phone, setPhone] = useState(DEMO_PHONE);   // pre-filled
+  const [otp, setOtp]     = useState('');
+  const [name, setName]   = useState('');
 
-  const recaptchaRef = useRef<HTMLDivElement>(null);
-  const { 
-    initRecaptcha, sendOtpCode, confirmOtpCode, otpSent, otpLoading, 
-    error, clearError, isAuthenticated, user,
-  } = useAuthStore();
-
+  const recaptchaContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Redirect if already authed
+  const {
+    setupRecaptcha,
+    teardownRecaptcha,
+    resetOtpState,
+    sendOtpCode,
+    confirmOtpCode,
+    otpSent,
+    otpLoading,
+    error,
+    clearError,
+    isAuthenticated,
+    user,
+  } = useAuthStore();
+
+  // ── Redirect if already authenticated ──────────────────────────────────────
   useEffect(() => {
-    if (isAuthenticated && user) navigate(ROLE_HOME[user.role] ?? '/student/dashboard', { replace: true });
+    if (isAuthenticated && user) {
+      navigate(ROLE_HOME[user.role] ?? '/student/dashboard', { replace: true });
+    }
   }, [isAuthenticated, user, navigate]);
 
-  // Setup reCAPTCHA on mount
+  // ── Initialize reCAPTCHA on mount, cleanup on unmount ──────────────────────
   useEffect(() => {
-    initRecaptcha('recaptcha-container');
-  }, [initRecaptcha]);
+    setupRecaptcha(RECAPTCHA_ID);
+    return () => teardownRecaptcha();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
+  // Re-initialize reCAPTCHA when going back to phone step
+  // (reCAPTCHA is consumed after each sendOtp call)
+  const reinitRecaptcha = () => {
+    setupRecaptcha(RECAPTCHA_ID);
+  };
+
+  // ── Send OTP ────────────────────────────────────────────────────────────────
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
-    if (!phone || phone.replace(/\D/g, '').length < 10) return;
-    await sendOtpCode(phone.replace(/\D/g, ''));
+    const digits = phone.replace(/\D/g, '');
+    if (digits.length < 10) return;
+    await sendOtpCode(digits, role);
   };
 
+  // ── Verify OTP ──────────────────────────────────────────────────────────────
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
-    const ok = await confirmOtpCode(otp, role, {
+    const ok = await confirmOtpCode(otp.trim(), role, {
       name: name.trim() || undefined,
     });
     if (ok) navigate(ROLE_HOME[role] ?? '/student/dashboard', { replace: true });
   };
 
+  // ── Resend OTP ──────────────────────────────────────────────────────────────
+  const handleResend = async () => {
+    clearError();
+    setOtp('');
+    resetOtpState();
+    reinitRecaptcha();
+    // Give DOM a tick to re-render the container before initializing
+    await new Promise(r => setTimeout(r, 100));
+    const digits = phone.replace(/\D/g, '');
+    await sendOtpCode(digits, role);
+  };
+
+  // ── Go back to phone entry ──────────────────────────────────────────────────
+  const handleBack = () => {
+    clearError();
+    setOtp('');
+    resetOtpState();
+    reinitRecaptcha();
+  };
+
   return (
     <div className="min-h-screen bg-bg-base flex selection:bg-accent-primary selection:text-white">
-      {/* Left hero panel */}
+
+      {/* ── Left hero panel ── */}
       <div className="hidden lg:flex w-[45%] bg-gradient-hero p-12 text-white flex-col justify-between relative overflow-hidden">
         <div className="absolute top-0 left-0 w-[800px] h-[800px] bg-white/5 rounded-full blur-3xl -translate-x-1/2 -translate-y-1/2" />
         <div className="absolute bottom-0 right-0 w-[600px] h-[600px] bg-[#10B981]/10 rounded-full blur-3xl translate-x-1/3 translate-y-1/3" />
@@ -113,19 +156,19 @@ const LoginPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right form panel */}
+      {/* ── Right form panel ── */}
       <div className="flex-1 flex flex-col justify-center px-6 sm:px-12 md:px-24 relative overflow-hidden">
-        <div className="w-full max-w-md mx-auto space-y-8 page-enter">
+        <div className="w-full max-w-md mx-auto space-y-6 page-enter">
 
-          {/* Logo (mobile) */}
-          <div className="lg:hidden flex items-center justify-center gap-3 mb-6">
+          {/* Logo (mobile only) */}
+          <div className="lg:hidden flex items-center justify-center gap-3 mb-2">
             <div className="w-12 h-12 bg-gradient-hero rounded-xl shadow-lg flex items-center justify-center">
               <QrCode size={28} className="text-white" />
             </div>
             <span className="text-3xl font-extrabold text-text-primary font-sora tracking-tight">PassMate</span>
           </div>
 
-          {/* Role selector */}
+          {/* Role selector — disabled once OTP is sent */}
           <div className="flex flex-wrap gap-2 justify-center lg:justify-start">
             {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([r, label]) => (
               <button
@@ -133,11 +176,11 @@ const LoginPage: React.FC = () => {
                 onClick={() => { setRole(r); clearError(); }}
                 disabled={otpSent}
                 className={[
-                  'px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
+                  'px-3 py-1.5 rounded-full text-xs font-semibold border transition-all',
                   role === r
-                    ? 'bg-accent-primary text-white border-accent-primary'
+                    ? 'bg-accent-primary text-white border-accent-primary shadow-sm'
                     : 'bg-white text-text-secondary border-border hover:bg-bg-muted',
-                  otpSent ? 'opacity-50 cursor-not-allowed pointer-events-none' : '',
+                  otpSent ? 'opacity-40 cursor-not-allowed' : '',
                 ].join(' ')}
               >
                 {label}
@@ -145,75 +188,99 @@ const LoginPage: React.FC = () => {
             ))}
           </div>
 
+          {/* Heading */}
           <div>
             <h2 className="text-3xl font-bold font-sora text-text-primary">
               {otpSent ? 'Enter OTP' : 'Secure Login'}
             </h2>
             <p className="text-text-muted mt-1 text-sm">
               {otpSent
-                ? `Code sent to +91 ${phone}. Valid for 2 minutes.`
-                : 'Login as ' + ROLE_LABELS[role] + ' using your registered mobile number.'}
+                ? `6-digit code sent to +91 ${phone}. Valid for 10 minutes.`
+                : `Login as ${ROLE_LABELS[role]} via mobile OTP.`}
             </p>
           </div>
 
+          {/* Error banner */}
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              <AlertCircle size={16} className="flex-shrink-0" />
-              {error}
+            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700 animate-in slide-in-from-top-2 duration-200">
+              <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
+              <span>{error}</span>
             </div>
           )}
 
+          {/* Form card */}
           <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-xl shadow-blue-900/5 border border-border">
             {!otpSent ? (
-              /* ── Step 1: Enter phone ── */
-              <form onSubmit={handleSendOtp} className="space-y-5">
+              /* ── Step 1: Enter phone number ── */
+              <form onSubmit={handleSendOtp} className="space-y-5" noValidate>
+
                 {role === 'student' && (
                   <div className="float-label-group">
                     <input
-                      type="text" placeholder=" " value={name}
+                      id="name"
+                      type="text"
+                      placeholder=" "
+                      value={name}
                       onChange={e => setName(e.target.value)}
                     />
-                    <label>Full Name (optional for first-time)</label>
+                    <label htmlFor="name">Full Name (optional for first-time)</label>
                   </div>
                 )}
 
-                <div className="float-label-group">
+                {/* Phone input with +91 prefix */}
+                <div>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm font-medium select-none">+91</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted text-sm font-semibold select-none pointer-events-none z-10">
+                      +91
+                    </span>
                     <input
+                      id="phone"
                       type="tel"
-                      placeholder=" "
+                      inputMode="numeric"
+                      placeholder="Mobile number"
                       value={phone}
                       onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                      className="!pl-12"
+                      className="w-full pl-12 pr-4 py-3 border border-border rounded-input text-sm focus:border-accent-primary focus:outline-none focus:shadow-[0_0_0_3px_rgba(47,111,237,0.1)] transition-all bg-white font-mono tracking-wider"
+                      maxLength={10}
                       required
                     />
-                    <label style={{ left: '3rem' }}>Mobile Number</label>
                   </div>
+                  <p className="mt-1.5 text-xs text-text-muted pl-1">
+                    💡 Demo number pre-filled — use for demo login
+                  </p>
                 </div>
 
-                {/* invisible reCAPTCHA anchor */}
-                <div id="recaptcha-container" ref={recaptchaRef} />
+                {/* Invisible reCAPTCHA anchor — must be in DOM before sendOtp */}
+                <div id={RECAPTCHA_ID} ref={recaptchaContainerRef} />
 
                 <button
                   type="submit"
-                  disabled={otpLoading || phone.length < 10}
+                  disabled={otpLoading || phone.replace(/\D/g, '').length < 10}
                   className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex justify-center items-center gap-2"
                 >
-                  {otpLoading ? 'Sending OTP...' : <><Phone size={16} /> Send OTP</>}
+                  {otpLoading
+                    ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Sending OTP...</>
+                    : <><Phone size={16} /> Send OTP</>}
                 </button>
               </form>
             ) : (
               /* ── Step 2: Enter OTP ── */
-              <form onSubmit={handleVerifyOtp} className="space-y-5">
-                <div className="flex gap-1 items-center text-sm text-text-secondary mb-2">
-                  <button type="button" onClick={() => { useAuthStore.getState().clearError(); useAuthStore.setState({ otpSent: false }); }} className="flex items-center gap-1 hover:text-accent-primary transition-colors">
-                    <ChevronLeft size={14} /> Change number
-                  </button>
-                </div>
+              <form onSubmit={handleVerifyOtp} className="space-y-5" noValidate>
 
+                {/* Back to phone */}
+                <button
+                  type="button"
+                  onClick={handleBack}
+                  disabled={otpLoading}
+                  className="flex items-center gap-1 text-sm text-text-secondary hover:text-accent-primary transition-colors disabled:opacity-50"
+                >
+                  <ChevronLeft size={14} /> Change number
+                </button>
+
+                {/* 6-digit OTP input */}
                 <div className="float-label-group">
                   <input
+                    id="otp"
                     type="text"
                     inputMode="numeric"
                     placeholder=" "
@@ -222,8 +289,9 @@ const LoginPage: React.FC = () => {
                     maxLength={6}
                     autoFocus
                     required
+                    className="tracking-[0.5em] text-center font-mono text-lg"
                   />
-                  <label>6-digit OTP</label>
+                  <label htmlFor="otp">6-digit OTP</label>
                 </div>
 
                 <button
@@ -231,29 +299,35 @@ const LoginPage: React.FC = () => {
                   disabled={otpLoading || otp.length < 6}
                   className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed flex justify-center items-center gap-2"
                 >
-                  {otpLoading ? 'Verifying...' : <><KeyRound size={16} /> Verify & Login</>}
+                  {otpLoading
+                    ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Verifying...</>
+                    : <><KeyRound size={16} /> Verify &amp; Login</>}
                 </button>
 
+                {/* Resend */}
                 <button
                   type="button"
-                  onClick={handleSendOtp}
+                  onClick={handleResend}
                   disabled={otpLoading}
-                  className="w-full text-center text-sm text-text-secondary hover:text-accent-primary transition-colors"
+                  className="w-full flex items-center justify-center gap-1.5 text-sm text-text-secondary hover:text-accent-primary transition-colors disabled:opacity-50 pt-1"
                 >
-                  Resend OTP
+                  <RefreshCw size={13} /> Resend OTP
                 </button>
               </form>
             )}
           </div>
 
-          {/* Demo seed hint */}
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-xs text-blue-700 space-y-1">
-            <p className="font-bold uppercase tracking-wider text-[10px] text-blue-500 mb-2">Demo Credentials</p>
-            <p>📱 Student: <span className="font-mono">+91 98450 12345</span></p>
-            <p>👪 Parent: <span className="font-mono">+91 98765 43210</span></p>
-            <p>🛡️ Warden: <span className="font-mono">+91 98450 01234</span></p>
-            <p>🔒 Guard: <span className="font-mono">+91 99000 12345</span></p>
-            <p className="text-blue-400 italic mt-2">OTP: 123456 (Firebase Auth Emulator / Test Numbers)</p>
+          {/* Demo hint */}
+          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 space-y-1">
+            <p className="font-bold uppercase tracking-wider text-[10px] text-amber-600 mb-2">🔬 Demo Login</p>
+            <p>
+              Phone: <span className="font-mono font-semibold">+91 {DEMO_PHONE}</span>
+              <span className="ml-2 text-amber-500">(pre-filled above)</span>
+            </p>
+            <p className="text-amber-600 mt-1">
+              Add this number as a <strong>test phone number</strong> in Firebase Console
+              with OTP <code className="bg-amber-100 px-1 rounded">123456</code> to skip real SMS.
+            </p>
           </div>
         </div>
       </div>
