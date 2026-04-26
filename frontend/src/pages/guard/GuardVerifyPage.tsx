@@ -5,6 +5,7 @@ import {
   Clock, AlertTriangle, LogOut, LogIn, User,
 } from 'lucide-react';
 import { validatePass, markExit, markEntry, getPass, type GatePass } from '../../services/passService';
+import { useAuthStore } from '../../store/authStore';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
 
@@ -64,6 +65,7 @@ const COLOR_CLASSES = {
 const GuardVerifyPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
 
   const [result,    setResult]    = useState<VerifyResult | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -131,10 +133,10 @@ const GuardVerifyPage: React.FC = () => {
     setActing(true);
     try {
       if (type === 'exit') {
-        await markExit(id);
+        await markExit(id, user?.uid);
         toast.success('✅ Exit marked successfully!');
       } else {
-        await markEntry(id);
+        await markEntry(id, user?.uid);
         const isLate = new Date() > result.pass.expectedReturn;
         if (isLate) {
           toast.success('⚠️ Entry marked — student returned LATE!', { duration: 4000 });

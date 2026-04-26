@@ -8,11 +8,12 @@ import {
 import { useAuthStore } from '../../store/authStore';
 import {
   subscribeAllPasses, wardenApprove, wardenReject,
-  type GatePass,
+  exportPassesCSV, type GatePass,
 } from '../../services/passService';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
 import toast from 'react-hot-toast';
+import { Download } from 'lucide-react';
 
 const WardenDashboard: React.FC = () => {
   const { user } = useAuthStore();
@@ -22,14 +23,15 @@ const WardenDashboard: React.FC = () => {
   const [isLoading,     setIsLoading]     = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null); // passId being actioned
 
-  // ── Real-time Firestore subscription ─────────────────────────────────────────
+  // ── Real-time Firestore subscription (scoped to warden's hostel if set) ──────
   useEffect(() => {
+    const hostelId = user?.hostel || undefined;
     const unsub = subscribeAllPasses((data) => {
       setPasses(data);
       setIsLoading(false);
-    });
+    }, hostelId);
     return unsub;
-  }, []);
+  }, [user?.hostel]);
 
   // ── Actions ───────────────────────────────────────────────────────────────────
   const handleApprove = async (pass: GatePass) => {
@@ -59,13 +61,20 @@ const WardenDashboard: React.FC = () => {
   };
 
   // ── Derived stats ─────────────────────────────────────────────────────────────
-  const pendingPasses  = passes.filter(p => ['pending', 'parent_approved'].includes(p.status));
-  const activeOut      = passes.filter(p => p.status === 'active');
-  const lateReturns    = passes.filter(p => p.isLate);
+  const todayStart    = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const pendingPasses = passes.filter(p => ['pending', 'parent_approved'].includes(p.status));
+  const activeOut     = passes.filter(p => p.status === 'active');
+  const lateReturns   = passes.filter(p => p.isLate);
+  const returnedToday = passes.filter(p => p.status === 'returned' && p.entryTime && p.entryTime >= todayStart);
   const recentActivity = passes.filter(p => ['returned', 'active'].includes(p.status)).slice(0, 6);
 
-  // Top 5 priority queue (pending ones first)
   const priorityQueue = pendingPasses.slice(0, 5);
+
+  const handleExportCSV = () => {
+    const date = format(new Date(), 'yyyy-MM-dd');
+    exportPassesCSV(passes, `passmate_${user?.hostel ?? 'all'}_${date}.csv`);
+    toast.success('CSV downloaded successfully!');
+  };
 
   return (
     <div className="space-y-6 page-enter">
@@ -77,15 +86,24 @@ const WardenDashboard: React.FC = () => {
             Warden Dashboard
           </h1>
           <p className="text-text-muted mt-1">
-            {user?.hostel ?? 'Hostel'} · {format(new Date(), 'EEEE, do MMMM yyyy')}
+            {user?.hostel ?? 'All Hostels'} · {format(new Date(), 'EEEE, do MMMM yyyy')}
           </p>
         </div>
-        <button
-          onClick={() => navigate('/warden/emergency')}
-          className="btn btn-danger-outline shadow-sm bg-white"
-        >
-          <AlertTriangle size={16} /> Emergency Override
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleExportCSV}
+            disabled={passes.length === 0}
+            className="btn btn-secondary gap-2 h-10 px-4 text-sm disabled:opacity-50"
+          >
+            <Download size={15} /> Export CSV
+          </button>
+          <button
+            onClick={() => navigate('/warden/emergency')}
+            className="btn btn-danger-outline shadow-sm bg-white"
+          >
+            <AlertTriangle size={16} /> Emergency
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -97,15 +115,15 @@ const WardenDashboard: React.FC = () => {
           {/* ── Stats Row ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard
-              label="Pending Requests"
+              label="Pending Approvals"
               value={pendingPasses.length}
               icon={<Clock size={20} />}
               color="amber"
               onClick={() => navigate('/warden/requests')}
             />
-            <StatCard label="Active Out"        value={activeOut.length}   icon={<Home size={20} />}         color="blue"  />
-            <StatCard label="Approved Today"    value={passes.filter(p => p.status === 'approved' || p.status === 'returned').length} icon={<ShieldCheck size={20} />}  color="green" />
-            <StatCard label="Late Returns"      value={lateReturns.length} icon={<AlertTriangle size={20} />} color="red"   />
+            <StatCard label="Currently Outside" value={activeOut.length}     icon={<Home size={20} />}         color="blue"  />
+            <StatCard label="Returned Today"    value={returnedToday.length}  icon={<ShieldCheck size={20} />}  color="green" />
+            <StatCard label="Late Returns"       value={lateReturns.length}    icon={<AlertTriangle size={20} />} color="red" trend={lateReturns.length > 0 ? { value: lateReturns.length, label: 'total late' } : undefined} />
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

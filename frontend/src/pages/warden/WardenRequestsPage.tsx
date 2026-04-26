@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { Search, Filter, ShieldCheck, X, Loader, CheckCircle2, XCircle } from 'lucide-react';
-import { subscribeAllPasses, wardenApprove, wardenReject, type GatePass } from '../../services/passService';
+import { Search, Filter, ShieldCheck, X, Loader, CheckCircle2, XCircle, Download } from 'lucide-react';
+import { subscribeAllPasses, wardenApprove, wardenReject, exportPassesCSV, type GatePass } from '../../services/passService';
 import { useAuthStore } from '../../store/authStore';
 import StatusPill from '../../components/ui/StatusPill';
 import SidePanel from '../../components/ui/SidePanel';
@@ -84,8 +84,15 @@ const WardenRequestsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 flex-shrink-0">
         <div>
           <h1 className="text-2xl font-bold font-sora text-text-primary">Gate Pass Requests</h1>
-          <p className="text-text-muted mt-1 text-sm">Real-time updates via Firestore.</p>
+          <p className="text-text-muted mt-1 text-sm">Real-time updates · {passes.length} total passes</p>
         </div>
+        <button
+          onClick={() => { exportPassesCSV(filteredPasses, `passes_${tab}_${format(new Date(), 'yyyy-MM-dd')}.csv`); toast.success('CSV downloaded!'); }}
+          disabled={filteredPasses.length === 0}
+          className="btn btn-secondary gap-2 h-10 px-4 text-sm disabled:opacity-50"
+        >
+          <Download size={15} /> Export CSV
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0">
