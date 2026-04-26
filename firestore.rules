@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    /**
+     * Safely fetch the caller's role from their Firestore user document.
+     * Returns 'unknown' when the document does not exist, preventing crashes
+     * caused by missing user profiles (e.g. first-time OTP login).
+     */
+    function userRole() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc.data.get('role', 'unknown');
+    }
+
+    function isRole(role) {
+      return isSignedIn() && userRole() == role;
+    }
+
+    /**
+     * Safely get the caller's hostelId.
+     * Returns null when the document or field does not exist.
+     */
+    function callerHostel() {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return userDoc.data.get('hostel', null);
+    }
+
+    // ── /users/{uid} ──────────────────────────────────────────────────────────
+
+    match /users/{uid} {
+      // Own profile: always readable/writable by the user themselves.
+      allow read:   if isSignedIn() && (
+                      request.auth.uid == uid ||
+                      userRole() == 'warden'  ||
+                      userRole() == 'admin'
+                    );
+      allow create: if isSignedIn() && request.auth.uid == uid;
+      allow update: if isSignedIn() && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // ── /passes/{passId} ─────────────────────────────────────────────────────
+
+    match /passes/{passId} {
+
+      // READ: own pass | warden/guard scoped to their hostel | admin
+      allow read: if isSignedIn() && (
+        resource.data.studentId == request.auth.uid  ||   // student reads own
+        (userRole() == 'warden' && resource.data.hostel == callerHostel()) ||
+        (userRole() == 'guard'  && resource.data.hostel == callerHostel()) ||
+        userRole() == 'admin'
+      );
+
+      // CREATE: students only, must match their own uid, must start as pending
+      allow create: if isSignedIn()
+        && userRole() == 'student'
+        && request.resource.data.studentId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.hostel != null;    // hostelId is mandatory
+
+      // UPDATE: role-scoped field restrictions
+      allow update: if isSignedIn() && (
+
+        // Warden approve/reject — hostel-scoped
+        (userRole() == 'warden'
+          && resource.data.hostel == callerHostel()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'status', 'wardenApproved', 'wardenApprovedAt', 'wardenId',
+               'wardenNote', 'qrData', 'approvedAt', 'approvedBy'
+             ])) ||
+
+        // Guard mark exit / entry — hostel-scoped
+        (userRole() == 'guard'
+          && resource.data.hostel == callerHostel()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'exitTime', 'entryTime', 'actualReturn', 'isLate', 'status',
+               'exitMarkedBy', 'entryMarkedBy'
+             ])) ||
+
+        // Parent approval
+        (userRole() == 'parent'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'parentApproved', 'parentApprovedAt', 'status'
+             ])) ||
+
+        // Admin can update any field
+        userRole() == 'admin'
+      );
+
+      // DELETE: never allowed — passes are permanent audit records
+      allow delete: if false;
+    }
+
+    // ── /audit_logs/{logId} ───────────────────────────────────────────────────
+
+    match /audit_logs/{logId} {
+      // READ: warden (hostel-scoped) or admin
+      allow read: if isSignedIn() && (
+        userRole() == 'admin' ||
+        (userRole() == 'warden' && resource.data.get('hostelId', null) == callerHostel())
+      );
+
+      // CREATE: any authenticated user, but actorId MUST equal the caller uid
+      // This prevents one user from writing audit logs on behalf of another.
+      allow create: if isSignedIn()
+        && request.resource.data.actorId == request.auth.uid;
+
+      // UPDATE / DELETE: never — audit logs are immutable
+      allow update: if false;
+      allow delete: if false;
+    }
+  }
+}

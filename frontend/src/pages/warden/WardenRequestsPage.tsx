@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Search, Filter, ShieldCheck, X, Loader, CheckCircle2, XCircle, Download } from 'lucide-react';
-import { subscribeAllPasses, wardenApprove, wardenReject, exportPassesCSV, type GatePass } from '../../services/passService';
+import { subscribeAllPasses, wardenApprove, wardenReject, exportPassesCSV, type GatePass, type CsvDateRange } from '../../services/passService';
 import { useAuthStore } from '../../store/authStore';
 import StatusPill from '../../components/ui/StatusPill';
 import SidePanel from '../../components/ui/SidePanel';
@@ -29,14 +29,16 @@ const WardenRequestsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [note, setNote] = useState('');
+  const [csvRange, setCsvRange] = useState<CsvDateRange>('today');
 
   useEffect(() => {
+    const hostelId = user?.hostel || undefined;
     const unsub = subscribeAllPasses(data => {
       setPasses(data);
       setIsLoading(false);
-    });
+    }, hostelId);
     return unsub;
-  }, []);
+  }, [user?.hostel]);
 
   const handleApprove = async () => {
     if (!selectedPass || !user) return;
@@ -86,13 +88,29 @@ const WardenRequestsPage: React.FC = () => {
           <h1 className="text-2xl font-bold font-sora text-text-primary">Gate Pass Requests</h1>
           <p className="text-text-muted mt-1 text-sm">Real-time updates · {passes.length} total passes</p>
         </div>
-        <button
-          onClick={() => { exportPassesCSV(filteredPasses, `passes_${tab}_${format(new Date(), 'yyyy-MM-dd')}.csv`); toast.success('CSV downloaded!'); }}
-          disabled={filteredPasses.length === 0}
-          className="btn btn-secondary gap-2 h-10 px-4 text-sm disabled:opacity-50"
-        >
-          <Download size={15} /> Export CSV
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={csvRange}
+            onChange={e => setCsvRange(e.target.value as CsvDateRange)}
+            className="h-10 border border-border rounded-input px-3 text-sm text-text-secondary bg-white focus:outline-none focus:border-accent-primary"
+          >
+            <option value="today">Today</option>
+            <option value="7days">Last 7 Days</option>
+            <option value="month">This Month</option>
+            <option value="all">All Time</option>
+          </select>
+          <button
+            onClick={() => {
+              exportPassesCSV(filteredPasses, `passes_${tab}_${csvRange}_${format(new Date(), 'yyyy-MM-dd')}.csv`, csvRange);
+              const label = { all: 'All', today: 'Today', '7days': 'Last 7 Days', month: 'This Month' }[csvRange];
+              toast.success(`CSV exported (${label})!`);
+            }}
+            disabled={filteredPasses.length === 0}
+            className="btn btn-secondary gap-2 h-10 px-4 text-sm disabled:opacity-50"
+          >
+            <Download size={15} /> Export CSV
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl border border-border shadow-sm flex flex-col flex-1 min-h-0">

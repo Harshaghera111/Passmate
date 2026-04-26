@@ -8,7 +8,7 @@ import {
 import { useAuthStore } from '../../store/authStore';
 import {
   subscribeAllPasses, wardenApprove, wardenReject,
-  exportPassesCSV, type GatePass,
+  exportPassesCSV, type GatePass, type CsvDateRange,
 } from '../../services/passService';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
@@ -21,7 +21,8 @@ const WardenDashboard: React.FC = () => {
 
   const [passes,        setPasses]        = useState<GatePass[]>([]);
   const [isLoading,     setIsLoading]     = useState(true);
-  const [actionLoading, setActionLoading] = useState<string | null>(null); // passId being actioned
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [csvRange,      setCsvRange]      = useState<CsvDateRange>('today');
 
   // ── Real-time Firestore subscription (scoped to warden's hostel if set) ──────
   useEffect(() => {
@@ -72,8 +73,9 @@ const WardenDashboard: React.FC = () => {
 
   const handleExportCSV = () => {
     const date = format(new Date(), 'yyyy-MM-dd');
-    exportPassesCSV(passes, `passmate_${user?.hostel ?? 'all'}_${date}.csv`);
-    toast.success('CSV downloaded successfully!');
+    exportPassesCSV(passes, `passmate_${user?.hostel ?? 'all'}_${csvRange}_${date}.csv`, csvRange);
+    const label = { all: 'All', today: 'Today', '7days': 'Last 7 Days', month: 'This Month' }[csvRange];
+    toast.success(`CSV exported (${label})!`);
   };
 
   return (
@@ -89,7 +91,17 @@ const WardenDashboard: React.FC = () => {
             {user?.hostel ?? 'All Hostels'} · {format(new Date(), 'EEEE, do MMMM yyyy')}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={csvRange}
+            onChange={e => setCsvRange(e.target.value as CsvDateRange)}
+            className="h-10 border border-border rounded-input px-3 text-sm text-text-secondary bg-white focus:outline-none focus:border-accent-primary"
+          >
+            <option value="today">Today</option>
+            <option value="7days">Last 7 Days</option>
+            <option value="month">This Month</option>
+            <option value="all">All Time</option>
+          </select>
           <button
             onClick={handleExportCSV}
             disabled={passes.length === 0}
