@@ -122,17 +122,38 @@ export async function listPasses(opts?: {
 
 /**
  * Subscribe to student's own passes in real-time.
+ * @param studentId  - the student's Firebase uid
+ * @param onChange   - called with the latest array of passes on every update
+ * @param onError    - called if Firestore returns an error (permission denied, etc.)
  */
 export function subscribeStudentPasses(
   studentId: string,
-  onChange: (passes: GatePass[]) => void
+  onChange: (passes: GatePass[]) => void,
+  onError?: (err: Error) => void
 ): () => void {
+  if (!studentId) {
+    console.error('[passService] subscribeStudentPasses called with empty studentId');
+    onError?.(new Error('Invalid studentId'));
+    return () => {};
+  }
+
   const q = query(
     collection(db, 'passes'),
     where('studentId', '==', studentId),
     orderBy('createdAt', 'desc')
   );
-  return onSnapshot(q, snap => onChange(snap.docs.map(fromDoc)));
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      console.log('[passService] Snapshot received. Docs:', snap.docs.length);
+      onChange(snap.docs.map(fromDoc));
+    },
+    (err) => {
+      console.error('[passService] onSnapshot error:', err.code, err.message);
+      onError?.(err);
+    }
+  );
 }
 
 /**

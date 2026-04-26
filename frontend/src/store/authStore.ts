@@ -12,6 +12,7 @@ import {
 interface AuthState {
   user: AppUser | null;
   isAuthenticated: boolean;
+  authLoading: boolean;  // true until Firebase Auth resolves for the first time
   error: string | null;
 
   // OTP flow state
@@ -36,6 +37,7 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       user: null,
       isAuthenticated: false,
+      authLoading: true,   // remains true until onAuthStateChanged fires once
       error: null,
       confirmationResult: null,
       otpSent: false,
@@ -99,20 +101,33 @@ export const useAuthStore = create<AuthState>()(
 
       initAuthListener: () => {
         return onAuthChange(async (fbUser) => {
+          console.log('[Auth] onAuthStateChanged fired. fbUser:', fbUser?.uid ?? null);
           if (fbUser) {
-            const profile = await fetchUserProfile(fbUser.uid);
-            if (profile) set({ user: profile, isAuthenticated: true });
+            try {
+              const profile = await fetchUserProfile(fbUser.uid);
+              if (profile) {
+                console.log('[Auth] Profile loaded:', profile.role);
+                set({ user: profile, isAuthenticated: true, authLoading: false });
+              } else {
+                // Firestore profile missing — sign out gracefully
+                console.warn('[Auth] No Firestore profile found for uid:', fbUser.uid);
+                set({ user: null, isAuthenticated: false, authLoading: false });
+              }
+            } catch (err) {
+              console.error('[Auth] Failed to fetch profile:', err);
+              set({ user: null, isAuthenticated: false, authLoading: false });
+            }
           } else {
-            // Only clear if we were authenticated (avoids race on initial load)
-            const { isAuthenticated } = get();
-            if (isAuthenticated) set({ user: null, isAuthenticated: false });
+            console.log('[Auth] No user signed in.');
+            set({ user: null, isAuthenticated: false, authLoading: false });
           }
         });
       },
     }),
     {
       name: 'passmate-auth-v2',
-      // ConfirmationResult is not JSON-serializable — exclude it
+      // ConfirmationResult is not JSON-serializable — exclude it.
+      // authLoading must NOT be persisted — it should always start true
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated,

@@ -1,213 +1,430 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { Plus, Clock, QrCode, ArrowRight, ShieldCheck, User, History as HistoryIcon, Loader } from 'lucide-react';
+import {
+  Plus, Clock, QrCode, ArrowRight, ShieldCheck,
+  User, History as HistoryIcon, AlertTriangle,
+  RefreshCw, WifiOff,
+} from 'lucide-react';
 import { useAuthStore } from '../../store/authStore';
 import { subscribeStudentPasses, type GatePass } from '../../services/passService';
 import StatCard from '../../components/ui/StatCard';
 import StatusPill from '../../components/ui/StatusPill';
 
+// ─── constants ────────────────────────────────────────────────────────────────
+
 const STATUS_MAP: Record<string, any> = {
-  pending: 'pending',
-  parent_approved: 'pending',
-  parent_rejected: 'rejected',
-  approved: 'approved',
-  rejected: 'rejected',
-  active: 'active',
-  returned: 'returned',
-  expired: 'expired',
+  pending:          'pending',
+  parent_approved:  'pending',
+  parent_rejected:  'rejected',
+  approved:         'approved',
+  rejected:         'rejected',
+  active:           'active',
+  returned:         'returned',
+  expired:          'expired',
 };
+
+const TIMEOUT_MS = 8000; // 8 s before showing "taking longer than expected"
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  if (hour < 21) return 'Good evening';
+  return 'Good night';
+}
+
+function getFormattedDate(): string {
+  return new Date().toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day:     'numeric',
+    month:   'long',
+    year:    'numeric',
+  });
+}
+
+// ─── skeleton components ──────────────────────────────────────────────────────
+
+const SkeletonPulse: React.FC<{ className?: string }> = ({ className = '' }) => (
+  <div className={`animate-pulse bg-gray-200 rounded-xl ${className}`} />
+);
+
+const DashboardSkeleton: React.FC = () => (
+  <div className="space-y-6 max-w-5xl mx-auto">
+    {/* Greeting skeleton */}
+    <div className="space-y-2">
+      <SkeletonPulse className="h-8 w-64" />
+      <SkeletonPulse className="h-4 w-40" />
+    </div>
+
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="lg:col-span-2 space-y-6">
+        {/* Hero card skeleton */}
+        <SkeletonPulse className="h-48 w-full rounded-2xl" />
+
+        {/* Stats skeleton */}
+        <div className="grid grid-cols-3 gap-4">
+          <SkeletonPulse className="h-24 rounded-2xl" />
+          <SkeletonPulse className="h-24 rounded-2xl" />
+          <SkeletonPulse className="h-24 rounded-2xl" />
+        </div>
+      </div>
+
+      {/* Activity skeleton */}
+      <div className="bg-white rounded-2xl border border-border shadow-sm p-5 space-y-4">
+        <SkeletonPulse className="h-5 w-32" />
+        {[1, 2, 3].map(i => (
+          <div key={i} className="flex gap-3">
+            <SkeletonPulse className="w-8 h-8 rounded-full flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <SkeletonPulse className="h-3 w-3/4" />
+              <SkeletonPulse className="h-3 w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
+// ─── main component ───────────────────────────────────────────────────────────
+
+type DataState = 'loading' | 'slow' | 'success' | 'empty' | 'error';
 
 const StudentDashboard: React.FC = () => {
   const { user } = useAuthStore();
   const navigate = useNavigate();
 
-  const [passes, setPasses] = useState<GatePass[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [passes,    setPasses]    = useState<GatePass[]>([]);
+  const [dataState, setDataState] = useState<DataState>('loading');
+  const [greeting,  setGreeting]  = useState(getGreeting());
+  const [dateStr,   setDateStr]   = useState(getFormattedDate());
+
+  const timeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resolvedRef = useRef(false); // prevent double-resolution
+
+  // Update greeting + date on mount (live time)
+  useEffect(() => {
+    setGreeting(getGreeting());
+    setDateStr(getFormattedDate());
+  }, []);
+
+  const clearPendingTimeout = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
-    if (!user) return;
-    const unsub = subscribeStudentPasses(user.uid, (data) => {
-      setPasses(data);
-      setIsLoading(false);
-    });
-    return unsub;
-  }, [user]);
+    if (!user?.uid) {
+      console.log('[Dashboard] No user uid — skipping Firestore fetch.');
+      return;
+    }
 
-  const activePass  = passes.find(p => ['active', 'approved'].includes(p.status));
-  const pendingPass = activePass ? null : passes.find(p => ['pending', 'parent_approved'].includes(p.status));
+    console.log('[Dashboard] User:', user.uid, '— subscribing to passes…');
+    resolvedRef.current = false;
+    setDataState('loading');
+    setPasses([]);
+
+    // ── Timeout failsafe ──────────────────────────────────────────────────────
+    timeoutRef.current = setTimeout(() => {
+      if (!resolvedRef.current) {
+        console.warn('[Dashboard] Firestore timeout — showing slow-network UI.');
+        setDataState('slow');
+      }
+    }, TIMEOUT_MS);
+
+    // ── Real-time subscription ────────────────────────────────────────────────
+    let unsub: (() => void) | undefined;
+
+    try {
+      console.log('[Dashboard] Fetching passes for studentId:', user.uid);
+
+      unsub = subscribeStudentPasses(
+        user.uid,
+        (data) => {
+          console.log('[Dashboard] Passes received:', data.length);
+          clearPendingTimeout();
+          resolvedRef.current = true;
+          setPasses(data);
+          setDataState(data.length > 0 ? 'success' : 'empty');
+        },
+        (err) => {
+          console.error('[Dashboard] Firestore error:', err);
+          clearPendingTimeout();
+          resolvedRef.current = true;
+          setDataState('error');
+        }
+      );
+    } catch (err) {
+      console.error('[Dashboard] Failed to subscribe:', err);
+      clearPendingTimeout();
+      setDataState('error');
+    }
+
+    return () => {
+      clearPendingTimeout();
+      unsub?.();
+    };
+  }, [user?.uid, clearPendingTimeout]);
+
+  // ── Derived data ─────────────────────────────────────────────────────────────
+  const activePass   = passes.find(p => ['active', 'approved'].includes(p.status));
+  const pendingPass  = activePass ? null : passes.find(p => ['pending', 'parent_approved'].includes(p.status));
   const recentPasses = passes.slice(0, 4);
 
+  // ── Render states ─────────────────────────────────────────────────────────────
+
+  // Skeleton loader (fast path — no blocking spinner on main thread)
+  if (dataState === 'loading') {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto">
+        {/* Header still shows immediately — no full-page blank */}
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold font-sora text-text-primary">
+            {greeting}, {user?.name?.split(' ')[0] ?? 'Student'} 👋
+          </h1>
+          <p className="text-text-muted mt-1">{dateStr}</p>
+        </div>
+        <DashboardSkeleton />
+      </div>
+    );
+  }
+
+  // Slow network banner (header stays visible, only data area shows warning)
+  if (dataState === 'slow') {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold font-sora text-text-primary">
+            {greeting}, {user?.name?.split(' ')[0] ?? 'Student'} 👋
+          </h1>
+          <p className="text-text-muted mt-1">{dateStr}</p>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 flex flex-col items-center gap-4 text-center">
+          <WifiOff size={36} className="text-amber-500" />
+          <div>
+            <h3 className="font-bold text-amber-900 text-lg">Taking longer than expected…</h3>
+            <p className="text-amber-700 text-sm mt-1 max-w-sm mx-auto">
+              Your data is still loading. This may be due to a slow network. Please wait or try refreshing.
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="btn btn-primary px-6 h-10 text-sm gap-2"
+          >
+            <RefreshCw size={15} />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (dataState === 'error') {
+    return (
+      <div className="space-y-6 max-w-5xl mx-auto">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold font-sora text-text-primary">
+            {greeting}, {user?.name?.split(' ')[0] ?? 'Student'} 👋
+          </h1>
+          <p className="text-text-muted mt-1">{dateStr}</p>
+        </div>
+
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-6 flex flex-col items-center gap-4 text-center">
+          <AlertTriangle size={36} className="text-red-500" />
+          <div>
+            <h3 className="font-bold text-red-900 text-lg">Failed to load data</h3>
+            <p className="text-red-700 text-sm mt-1 max-w-sm mx-auto">
+              We couldn't fetch your passes. Please check your connection and try again.
+            </p>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="btn btn-primary px-6 h-10 text-sm gap-2"
+          >
+            <RefreshCw size={15} />
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Success / Empty — full dashboard ─────────────────────────────────────────
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold font-sora text-text-primary">
-            Good morning, {user?.name?.split(' ')[0] ?? 'Student'} 👋
+            {greeting}, {user?.name?.split(' ')[0] ?? 'Student'} 👋
           </h1>
-          <p className="text-text-muted mt-1">{format(new Date(), 'EEEE, do MMMM yyyy')}</p>
+          <p className="text-text-muted mt-1">{dateStr}</p>
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader className="animate-spin text-accent-primary" size={32} />
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
 
-              {/* Active Pass Hero */}
-              {activePass ? (
-                <div
-                  onClick={() => navigate(`/student/pass/${activePass.id}`)}
-                  className="bg-gradient-card rounded-2xl p-6 sm:p-8 text-white relative overflow-hidden shadow-xl cursor-pointer hover:shadow-2xl transition-all group"
-                >
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
-                  <div className="absolute bottom-0 right-10 opacity-10 group-hover:scale-110 transition-transform duration-500">
-                    <QrCode size={180} />
-                  </div>
+          {/* ── Active / Pending / Empty pass hero ── */}
+          {activePass ? (
+            <div
+              onClick={() => navigate(`/student/pass/${activePass.id}`)}
+              className="bg-gradient-card rounded-2xl p-6 sm:p-8 text-white relative overflow-hidden shadow-xl cursor-pointer hover:shadow-2xl transition-all group"
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3" />
+              <div className="absolute bottom-0 right-10 opacity-10 group-hover:scale-110 transition-transform duration-500">
+                <QrCode size={180} />
+              </div>
 
-                  <div className="relative z-10 flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
-                    <div>
-                      <div className="flex items-center gap-3 mb-4">
-                        <span className="bg-white/20 text-white backdrop-blur-md px-3 py-1 rounded-badge text-xs font-bold uppercase tracking-wider border border-white/20 shadow-sm">
-                          {activePass.status === 'active' ? 'Currently Out' : 'Approved, Not Exited'}
-                        </span>
-                        <span className="bg-black/30 backdrop-blur-md px-3 py-1 rounded-badge text-xs font-mono border border-white/10">
-                          {activePass.id.slice(0, 8)}
-                        </span>
-                      </div>
-                      <h2 className="text-3xl font-bold font-sora mb-1">Gate Pass Ready</h2>
-                      <p className="text-blue-100 mb-6 max-w-sm">
-                        Tap here to view your QR code and scan at the security gate.
-                      </p>
-                      <div className="flex items-center gap-2 text-sm font-medium bg-white/10 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/20">
-                        <Clock size={16} className="text-blue-200" />
-                        <span>Valid until: {format(activePass.expectedReturn, 'MMM d, h:mm a')}</span>
-                      </div>
-                    </div>
-
-                    <div className="w-24 h-24 bg-white rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 group-hover:scale-105 transition-transform duration-300">
-                      <QrCode size={64} className="text-text-primary" />
-                    </div>
+              <div className="relative z-10 flex flex-col sm:flex-row gap-6 items-start sm:items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-3 mb-4">
+                    <span className="bg-white/20 text-white backdrop-blur-md px-3 py-1 rounded-badge text-xs font-bold uppercase tracking-wider border border-white/20 shadow-sm">
+                      {activePass.status === 'active' ? 'Currently Out' : 'Approved, Not Exited'}
+                    </span>
+                    <span className="bg-black/30 backdrop-blur-md px-3 py-1 rounded-badge text-xs font-mono border border-white/10">
+                      {activePass.id.slice(0, 8)}
+                    </span>
                   </div>
-                </div>
-              ) : pendingPass ? (
-                <div
-                  onClick={() => navigate('/student/history')}
-                  className="bg-amber-50 border border-amber-200 rounded-2xl p-6 relative overflow-hidden cursor-pointer hover:shadow-md transition-all"
-                >
-                  <div className="flex gap-4 items-start">
-                    <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 status-pending">
-                      <Clock size={24} className="text-amber-600" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <h3 className="text-lg font-bold font-sora text-amber-900">Pass under review</h3>
-                        <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-badge text-[10px] font-bold uppercase tracking-wider">Pending</span>
-                      </div>
-                      <p className="text-amber-700 text-sm max-w-md">
-                        Your pass request is currently waiting for warden approval.
-                      </p>
-                      <div className="mt-4 flex flex-col sm:flex-row gap-4">
-                        <div className="flex items-center gap-2 text-sm">
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center ${pendingPass.parentApproved === true ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                            {pendingPass.parentApproved === true ? <ShieldCheck size={14} /> : <Clock size={14} />}
-                          </div>
-                          <span className={pendingPass.parentApproved === true ? 'text-emerald-700 font-medium' : 'text-amber-700'}>
-                            {pendingPass.parentApproved === true ? 'Parent Approved ✓' : 'Parent Approval Pending'}
-                          </span>
-                        </div>
-                        <div className="hidden sm:block text-amber-300">→</div>
-                        <div className="flex items-center gap-2 text-sm">
-                          <div className="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
-                            <Clock size={14} />
-                          </div>
-                          <span className="text-amber-700">Warden Approval Pending</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-white rounded-2xl p-8 border border-border shadow-sm text-center">
-                  <div className="w-16 h-16 bg-blue-50 text-accent-primary rounded-full flex items-center justify-center mx-auto mb-4">
-                    <QrCode size={32} />
-                  </div>
-                  <h3 className="text-xl font-bold font-sora text-text-primary mb-2">No Active Gate Pass</h3>
-                  <p className="text-text-muted mb-6 max-w-sm mx-auto">
-                    You don't have any active or pending passes. Planning to go out?
+                  <h2 className="text-3xl font-bold font-sora mb-1">Gate Pass Ready</h2>
+                  <p className="text-blue-100 mb-6 max-w-sm">
+                    Tap here to view your QR code and scan at the security gate.
                   </p>
-                  <button
-                    onClick={() => navigate('/student/request/new')}
-                    className="btn btn-primary h-12 px-8 shadow-md hover:shadow-lg transition-all group"
-                  >
-                    <Plus size={18} />
-                    <span>Request Gate Pass</span>
-                    <ArrowRight size={18} className="ml-1 opacity-50 group-hover:translate-x-1 group-hover:opacity-100 transition-all" />
-                  </button>
-                </div>
-              )}
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <StatCard label="Total Passes" value={passes.length} icon={<HistoryIcon size={20} />} color="blue" />
-                <StatCard label="On Time Returns" value={passes.filter(p => p.status === 'returned' && !p.isLate).length} icon={<ShieldCheck size={20} />} color="green" />
-                <div className="col-span-2 sm:col-span-1 border border-border rounded-card bg-bg-muted/50 p-5 flex flex-col justify-center items-center text-center">
-                  <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2">
-                    <User size={18} className="text-text-secondary" />
+                  <div className="flex items-center gap-2 text-sm font-medium bg-white/10 w-fit px-4 py-2 rounded-xl backdrop-blur-md border border-white/20">
+                    <Clock size={16} className="text-blue-200" />
+                    <span>Valid until: {format(activePass.expectedReturn, 'MMM d, h:mm a')}</span>
                   </div>
-                  <p className="font-semibold text-text-primary">{user?.room ?? '—'}</p>
-                  <p className="text-xs text-text-muted">{user?.hostel ?? 'Hostel'}</p>
+                </div>
+
+                <div className="w-24 h-24 bg-white rounded-xl flex items-center justify-center shadow-lg flex-shrink-0 group-hover:scale-105 transition-transform duration-300">
+                  <QrCode size={64} className="text-text-primary" />
                 </div>
               </div>
             </div>
-
-            {/* Recent Activity */}
-            <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col">
-              <div className="p-5 border-b border-border flex justify-between items-center bg-gray-50/50">
-                <h3 className="font-semibold font-sora text-text-primary">Recent Activity</h3>
-                <button onClick={() => navigate('/student/history')} className="text-xs font-semibold text-accent-primary hover:underline">
-                  View All
-                </button>
-              </div>
-              <div className="p-5 flex-1 relative">
-                {recentPasses.length === 0 ? (
-                  <p className="text-sm text-text-muted text-center pt-10">No recent activity.</p>
-                ) : (
-                  <div className="space-y-6 relative z-10">
-                    {recentPasses.length > 0 && <div className="absolute left-[33px] top-6 bottom-6 w-px bg-border z-0" />}
-                    {recentPasses.map(pass => (
-                      <div key={pass.id} className="flex gap-4">
-                        <div className="w-8 h-8 rounded-full bg-white border border-border flex flex-col items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
-                          {pass.status === 'returned'  ? <ShieldCheck size={14} className="text-emerald-500" /> :
-                           pass.status === 'rejected'  ? <span className="text-red-500 font-bold text-xs">✕</span> :
-                           pass.status === 'active'    ? <Clock size={14} className="text-accent-primary" /> :
-                           <div className="w-2 h-2 rounded-full bg-border" />}
-                        </div>
-                        <div>
-                          <div className="flex justify-between items-start mb-1">
-                            <p className="text-sm font-semibold text-text-primary">{pass.reasonDetail}</p>
-                          </div>
-                          <p className="text-xs text-text-muted mb-2">{format(pass.createdAt, 'MMM d, h:mm a')}</p>
-                          <div className="flex gap-2">
-                            <StatusPill status={STATUS_MAP[pass.status] ?? pass.status} size="sm" />
-                            {pass.parentApproved !== null && (
-                              <StatusPill status={pass.parentApproved ? 'parent_approved' as any : 'parent_rejected' as any} size="sm" pulse={false} />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+          ) : pendingPass ? (
+            <div
+              onClick={() => navigate('/student/history')}
+              className="bg-amber-50 border border-amber-200 rounded-2xl p-6 relative overflow-hidden cursor-pointer hover:shadow-md transition-all"
+            >
+              <div className="flex gap-4 items-start">
+                <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0 status-pending">
+                  <Clock size={24} className="text-amber-600" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h3 className="text-lg font-bold font-sora text-amber-900">Pass under review</h3>
+                    <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-badge text-[10px] font-bold uppercase tracking-wider">Pending</span>
                   </div>
-                )}
+                  <p className="text-amber-700 text-sm max-w-md">
+                    Your pass request is currently waiting for warden approval.
+                  </p>
+                  <div className="mt-4 flex flex-col sm:flex-row gap-4">
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className={`w-6 h-6 rounded-full flex items-center justify-center ${pendingPass.parentApproved === true ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                        {pendingPass.parentApproved === true ? <ShieldCheck size={14} /> : <Clock size={14} />}
+                      </div>
+                      <span className={pendingPass.parentApproved === true ? 'text-emerald-700 font-medium' : 'text-amber-700'}>
+                        {pendingPass.parentApproved === true ? 'Parent Approved ✓' : 'Parent Approval Pending'}
+                      </span>
+                    </div>
+                    <div className="hidden sm:block text-amber-300">→</div>
+                    <div className="flex items-center gap-2 text-sm">
+                      <div className="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center">
+                        <Clock size={14} />
+                      </div>
+                      <span className="text-amber-700">Warden Approval Pending</span>
+                    </div>
+                  </div>
+                </div>
               </div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl p-8 border border-border shadow-sm text-center">
+              <div className="w-16 h-16 bg-blue-50 text-accent-primary rounded-full flex items-center justify-center mx-auto mb-4">
+                <QrCode size={32} />
+              </div>
+              <h3 className="text-xl font-bold font-sora text-text-primary mb-2">No Active Gate Pass</h3>
+              <p className="text-text-muted mb-6 max-w-sm mx-auto">
+                {dataState === 'empty'
+                  ? "You haven't requested any passes yet. Planning to go out?"
+                  : "You don't have any active or pending passes. Planning to go out?"}
+              </p>
+              <button
+                onClick={() => navigate('/student/request/new')}
+                className="btn btn-primary h-12 px-8 shadow-md hover:shadow-lg transition-all group"
+              >
+                <Plus size={18} />
+                <span>Request Gate Pass</span>
+                <ArrowRight size={18} className="ml-1 opacity-50 group-hover:translate-x-1 group-hover:opacity-100 transition-all" />
+              </button>
+            </div>
+          )}
+
+          {/* ── Stats ── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <StatCard label="Total Passes"     value={passes.length}                                                   icon={<HistoryIcon size={20} />} color="blue"  />
+            <StatCard label="On Time Returns"  value={passes.filter(p => p.status === 'returned' && !p.isLate).length} icon={<ShieldCheck size={20} />} color="green" />
+            <div className="col-span-2 sm:col-span-1 border border-border rounded-card bg-bg-muted/50 p-5 flex flex-col justify-center items-center text-center">
+              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm mb-2">
+                <User size={18} className="text-text-secondary" />
+              </div>
+              <p className="font-semibold text-text-primary">{user?.room ?? '—'}</p>
+              <p className="text-xs text-text-muted">{user?.hostel ?? 'Hostel'}</p>
             </div>
           </div>
-        </>
-      )}
+        </div>
+
+        {/* ── Recent Activity ── */}
+        <div className="bg-white rounded-2xl border border-border shadow-sm overflow-hidden flex flex-col">
+          <div className="p-5 border-b border-border flex justify-between items-center bg-gray-50/50">
+            <h3 className="font-semibold font-sora text-text-primary">Recent Activity</h3>
+            <button onClick={() => navigate('/student/history')} className="text-xs font-semibold text-accent-primary hover:underline">
+              View All
+            </button>
+          </div>
+          <div className="p-5 flex-1 relative">
+            {recentPasses.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center gap-2">
+                <HistoryIcon size={28} className="text-text-muted/50" />
+                <p className="text-sm text-text-muted">No passes yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-6 relative z-10">
+                {recentPasses.length > 0 && <div className="absolute left-[33px] top-6 bottom-6 w-px bg-border z-0" />}
+                {recentPasses.map(pass => (
+                  <div key={pass.id} className="flex gap-4">
+                    <div className="w-8 h-8 rounded-full bg-white border border-border flex flex-col items-center justify-center flex-shrink-0 mt-0.5 shadow-sm">
+                      {pass.status === 'returned'  ? <ShieldCheck size={14} className="text-emerald-500" /> :
+                       pass.status === 'rejected'  ? <span className="text-red-500 font-bold text-xs">✕</span> :
+                       pass.status === 'active'    ? <Clock size={14} className="text-accent-primary" /> :
+                       <div className="w-2 h-2 rounded-full bg-border" />}
+                    </div>
+                    <div>
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-sm font-semibold text-text-primary">{pass.reasonDetail}</p>
+                      </div>
+                      <p className="text-xs text-text-muted mb-2">{format(pass.createdAt, 'MMM d, h:mm a')}</p>
+                      <div className="flex gap-2">
+                        <StatusPill status={STATUS_MAP[pass.status] ?? pass.status} size="sm" />
+                        {pass.parentApproved !== null && (
+                          <StatusPill status={pass.parentApproved ? 'parent_approved' as any : 'parent_rejected' as any} size="sm" pulse={false} />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
