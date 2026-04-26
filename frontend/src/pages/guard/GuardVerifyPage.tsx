@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { validatePass, markExit, markEntry, getPass, type GatePass } from '../../services/passService';
 import { useAuthStore } from '../../store/authStore';
-import { format } from 'date-fns';
+import { format, formatDistanceToNowStrict } from 'date-fns';
 import toast from 'react-hot-toast';
 
 // ─── Validation result categories ─────────────────────────────────────────────
@@ -60,6 +60,19 @@ const COLOR_CLASSES = {
   blue:  { banner: 'bg-blue-500',     border: 'border-blue-100',    icon: 'text-blue-500'    },
   red:   { banner: 'bg-red-500',      border: 'border-red-100',     icon: 'text-red-500'     },
   amber: { banner: 'bg-amber-500',    border: 'border-amber-100',   icon: 'text-amber-500'   },
+};
+
+const LiveTimer: React.FC<{ targetDate: Date }> = ({ targetDate }) => {
+  const [timeLeft, setTimeLeft] = useState(() => formatDistanceToNowStrict(targetDate));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft(formatDistanceToNowStrict(targetDate));
+    }, 60000); // update every minute
+    return () => clearInterval(timer);
+  }, [targetDate]);
+
+  return <span className="ml-1 text-[11px] opacity-80 font-normal">({timeLeft} left)</span>;
 };
 
 const GuardVerifyPage: React.FC = () => {
@@ -242,7 +255,12 @@ const GuardVerifyPage: React.FC = () => {
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase text-amber-700 mb-0.5">Return By</p>
-                  <p className="font-bold text-amber-700">{format(pass.expectedReturn, 'MMM d, h:mm a')}</p>
+                  <p className="font-bold text-amber-700">
+                    {format(pass.expectedReturn, 'MMM d, h:mm a')}
+                    {(result.state === 'valid_exit' || result.state === 'valid_entry') && (
+                      <LiveTimer targetDate={pass.expectedReturn} />
+                    )}
+                  </p>
                 </div>
               </div>
 

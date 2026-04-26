@@ -6,10 +6,11 @@ import type { UserRole } from '../services/authService';
 import { ROLE_HOME } from '../routes/ProtectedRoute';
 
 // ─── Demo / test phone number ─────────────────────────────────────────────────
-// Add this number in Firebase Console → Authentication → Sign-in method
-// → Phone → Test phone numbers → +917620981982 / OTP: 123456
+// For development/testing: add +917620981982 / OTP 123456 to Firebase Console
+// → Authentication → Sign-in method → Phone → Test phone numbers
+// In production: leave DEMO_PHONE as '' so users type their own number.
 // ─────────────────────────────────────────────────────────────────────────────
-const DEMO_PHONE = '7620981982';
+const DEMO_PHONE = import.meta.env.VITE_DEMO_PHONE ?? '';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   student: 'Student',
@@ -26,9 +27,10 @@ const LoginPage: React.FC = () => {
   const defaultRole = (searchParams.get('role') as UserRole) || 'student';
 
   const [role, setRole]   = useState<UserRole>(defaultRole);
-  const [phone, setPhone] = useState(DEMO_PHONE);   // pre-filled
+  const [phone, setPhone] = useState(DEMO_PHONE);
   const [otp, setOtp]     = useState('');
   const [name, setName]   = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0); // seconds remaining
 
   const recaptchaContainerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -67,13 +69,14 @@ const LoginPage: React.FC = () => {
     setupRecaptcha(RECAPTCHA_ID);
   };
 
-  // ── Send OTP ────────────────────────────────────────────────────────────────
+  // ── Send OTP ────────────────────────────────────────────────────────────────────
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 10) return;
     await sendOtpCode(digits, role);
+    setResendCooldown(60); // start 60-second cooldown
   };
 
   // ── Verify OTP ──────────────────────────────────────────────────────────────
@@ -93,17 +96,25 @@ const LoginPage: React.FC = () => {
     }
   };
 
-  // ── Resend OTP ──────────────────────────────────────────────────────────────
+  // ── Resend OTP ───────────────────────────────────────────────────────────────────
   const handleResend = async () => {
+    if (resendCooldown > 0) return;
     clearError();
     setOtp('');
     resetOtpState();
     reinitRecaptcha();
-    // Give DOM a tick to re-render the container before initializing
     await new Promise(r => setTimeout(r, 100));
     const digits = phone.replace(/\D/g, '');
     await sendOtpCode(digits, role);
+    setResendCooldown(60);
   };
+
+  // ── Cooldown ticker ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = window.setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
 
   // ── Go back to phone entry ──────────────────────────────────────────────────
   const handleBack = () => {
@@ -311,31 +322,33 @@ const LoginPage: React.FC = () => {
                     : <><KeyRound size={16} /> Verify &amp; Login</>}
                 </button>
 
-                {/* Resend */}
                 <button
                   type="button"
                   onClick={handleResend}
-                  disabled={otpLoading}
+                  disabled={otpLoading || resendCooldown > 0}
                   className="w-full flex items-center justify-center gap-1.5 text-sm text-text-secondary hover:text-accent-primary transition-colors disabled:opacity-50 pt-1"
                 >
-                  <RefreshCw size={13} /> Resend OTP
+                  <RefreshCw size={13} />
+                  {resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}
                 </button>
               </form>
             )}
           </div>
 
-          {/* Demo hint */}
-          <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 space-y-1">
-            <p className="font-bold uppercase tracking-wider text-[10px] text-amber-600 mb-2">🔬 Demo Login</p>
-            <p>
-              Phone: <span className="font-mono font-semibold">+91 {DEMO_PHONE}</span>
-              <span className="ml-2 text-amber-500">(pre-filled above)</span>
-            </p>
-            <p className="text-amber-600 mt-1">
-              Add this number as a <strong>test phone number</strong> in Firebase Console
-              with OTP <code className="bg-amber-100 px-1 rounded">123456</code> to skip real SMS.
-            </p>
-          </div>
+          {/* Demo hint — only shown in dev/demo mode */}
+          {DEMO_PHONE && (
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-xs text-amber-800 space-y-1">
+              <p className="font-bold uppercase tracking-wider text-[10px] text-amber-600 mb-2">🔬 Demo Login</p>
+              <p>
+                Phone: <span className="font-mono font-semibold">+91 {DEMO_PHONE}</span>
+                <span className="ml-2 text-amber-500">(pre-filled above)</span>
+              </p>
+              <p className="text-amber-600 mt-1">
+                Add this number as a <strong>test phone number</strong> in Firebase Console
+                with OTP <code className="bg-amber-100 px-1 rounded">123456</code> to skip real SMS.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
