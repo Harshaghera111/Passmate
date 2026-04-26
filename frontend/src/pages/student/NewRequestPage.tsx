@@ -26,6 +26,15 @@ const NewRequestPage: React.FC = () => {
   const handleNext = () => setStep(s => Math.min(s + 1, 2));
   const handleBack = () => setStep(s => Math.max(s - 1, 0));
 
+  // ── Time validation helpers ──────────────────────────────────────────────
+  const outDate    = new Date(formData.outTime);
+  const returnDate = new Date(formData.expectedReturn);
+  const now        = new Date();
+  const outInPast  = outDate < now;
+  const returnBeforeOut = returnDate <= outDate;
+  const step1HasTimeError = outInPast || returnBeforeOut;
+  const step1Incomplete   = !formData.reasonType || !formData.reasonDetail || step1HasTimeError;
+
   const handleSubmit = async () => {
     if (!user) return;
     setIsSubmitting(true);
@@ -138,16 +147,28 @@ const NewRequestPage: React.FC = () => {
                   type="datetime-local"
                   value={formData.outTime}
                   onChange={e => setFormData({ ...formData, outTime: e.target.value })}
+                  className={outInPast ? 'border-red-400 focus:border-red-500' : ''}
                 />
                 <label>Out Time</label>
+                {outInPast && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertTriangle size={11} /> Out time cannot be in the past
+                  </p>
+                )}
               </div>
               <div className="float-label-group">
                 <input
                   type="datetime-local"
                   value={formData.expectedReturn}
                   onChange={e => setFormData({ ...formData, expectedReturn: e.target.value })}
+                  className={returnBeforeOut ? 'border-red-400 focus:border-red-500' : ''}
                 />
                 <label>Expected Return</label>
+                {returnBeforeOut && (
+                  <p className="text-red-500 text-xs mt-1 flex items-center gap-1">
+                    <AlertTriangle size={11} /> Return time must be after out time
+                  </p>
+                )}
               </div>
             </div>
           </div>
@@ -199,7 +220,7 @@ const NewRequestPage: React.FC = () => {
         {step < 2 ? (
           <button
             onClick={handleNext}
-            disabled={step === 1 && (!formData.reasonType || !formData.reasonDetail)}
+            disabled={step === 1 && step1Incomplete}
             className="btn btn-primary min-w-[120px]"
           >
             Next <ArrowRight size={16} />

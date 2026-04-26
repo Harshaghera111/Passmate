@@ -22,7 +22,7 @@ const CompleteProfilePage: React.FC = () => {
     e.preventDefault();
     clearError();
 
-    if (!name.trim() || !room.trim()) return;
+    if (!name.trim() || !room.trim() || !hostel) return;
 
     const ok = await completeProfile({
       name:   name.trim(),
@@ -113,13 +113,14 @@ const CompleteProfilePage: React.FC = () => {
                 id="profile-hostel"
                 value={hostel}
                 onChange={e => setHostel(e.target.value)}
+                required
               >
-                <option value="">Select hostel block</option>
+                <option value="" disabled>Select hostel block *</option>
                 {HOSTEL_OPTIONS.map(h => (
                   <option key={h} value={h}>{h}</option>
                 ))}
               </select>
-              <label htmlFor="profile-hostel">Hostel Block</label>
+              <label htmlFor="profile-hostel">Hostel Block *</label>
             </div>
 
             {/* USN — only for students */}
@@ -160,7 +161,7 @@ const CompleteProfilePage: React.FC = () => {
 
             <button
               type="submit"
-              disabled={otpLoading || !name.trim() || !room.trim()}
+              disabled={otpLoading || !name.trim() || !room.trim() || !hostel}
               className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {otpLoading ? (
