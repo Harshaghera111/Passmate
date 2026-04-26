@@ -101,6 +101,7 @@ const StudentDashboard: React.FC = () => {
   const [dataState, setDataState] = useState<DataState>('loading');
   const [greeting,  setGreeting]  = useState(getGreeting());
   const [dateStr,   setDateStr]   = useState(getFormattedDate());
+  const [retryCount, setRetryCount] = useState(0);
 
   const timeoutRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resolvedRef = useRef(false); // prevent double-resolution
@@ -120,11 +121,11 @@ const StudentDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!user?.uid) {
-      console.log('[Dashboard] No user uid — skipping Firestore fetch.');
+      console.log('[Dashboard] No user uid yet — waiting for auth to resolve.');
       return;
     }
 
-    console.log('[Dashboard] User:', user.uid, '— subscribing to passes…');
+    console.log(`[Dashboard] User UID: ${user.uid} — subscribing to passes… (Attempt: ${retryCount + 1})`);
     resolvedRef.current = false;
     setDataState('loading');
     setPasses([]);
@@ -141,7 +142,7 @@ const StudentDashboard: React.FC = () => {
     let unsub: (() => void) | undefined;
 
     try {
-      console.log('[Dashboard] Fetching passes for studentId:', user.uid);
+      console.log('[Dashboard] Fetching passes for:', user.uid);
 
       unsub = subscribeStudentPasses(
         user.uid,
@@ -152,8 +153,12 @@ const StudentDashboard: React.FC = () => {
           setPasses(data);
           setDataState(data.length > 0 ? 'success' : 'empty');
         },
-        (err) => {
-          console.error('[Dashboard] Firestore error:', err);
+        (err: any) => {
+          console.error('[Dashboard] Firestore error occurred!');
+          console.error('[Dashboard] Error Code:', err.code);
+          console.error('[Dashboard] Error Message:', err.message);
+          console.error(err);
+          
           clearPendingTimeout();
           resolvedRef.current = true;
           setDataState('error');
@@ -169,7 +174,7 @@ const StudentDashboard: React.FC = () => {
       clearPendingTimeout();
       unsub?.();
     };
-  }, [user?.uid, clearPendingTimeout]);
+  }, [user?.uid, clearPendingTimeout, retryCount]);
 
   // ── Derived data ─────────────────────────────────────────────────────────────
   const activePass   = passes.find(p => ['active', 'approved'].includes(p.status));
@@ -214,7 +219,7 @@ const StudentDashboard: React.FC = () => {
             </p>
           </div>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => setRetryCount(c => c + 1)}
             className="btn btn-primary px-6 h-10 text-sm gap-2"
           >
             <RefreshCw size={15} />
@@ -245,7 +250,7 @@ const StudentDashboard: React.FC = () => {
             </p>
           </div>
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => setRetryCount(c => c + 1)}
             className="btn btn-primary px-6 h-10 text-sm gap-2"
           >
             <RefreshCw size={15} />
