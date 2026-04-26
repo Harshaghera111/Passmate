@@ -41,7 +41,10 @@ const AppShell: React.FC = () => {
   // 2️⃣ Auth resolved — not authenticated → redirect to login
   if (!isAuthenticated || !user) return <Navigate to="/login" replace />;
 
-  // 3️⃣ Authenticated — render shell
+  // 3️⃣ Authenticated but profile not yet complete → redirect to profile form
+  if (user.profileComplete === false) return <Navigate to="/complete-profile" replace />;
+
+  // 4️⃣ Authenticated — render shell
   return (
     <div className="flex h-screen bg-bg-base overflow-hidden">
       {/* Sidebar — desktop only */}

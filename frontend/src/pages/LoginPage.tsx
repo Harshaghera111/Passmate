@@ -83,7 +83,14 @@ const LoginPage: React.FC = () => {
     const ok = await confirmOtpCode(otp.trim(), role, {
       name: name.trim() || undefined,
     });
-    if (ok) navigate(ROLE_HOME[role] ?? '/student/dashboard', { replace: true });
+    if (ok) {
+      // First-time user: profile not yet complete → redirect to profile form
+      if (user?.profileComplete === false) {
+        navigate('/complete-profile', { replace: true });
+      } else {
+        navigate(ROLE_HOME[role] ?? '/student/dashboard', { replace: true });
+      }
+    }
   };
 
   // ── Resend OTP ──────────────────────────────────────────────────────────────

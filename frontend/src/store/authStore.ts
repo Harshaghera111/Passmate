@@ -5,7 +5,7 @@ import type { ConfirmationResult } from 'firebase/auth';
 import {
   initRecaptcha, cleanupRecaptcha,
   sendOTP, verifyOTP, logoutUser,
-  onAuthChange, fetchUserProfile,
+  onAuthChange, fetchUserProfile, saveUserProfile,
   type AppUser, type UserRole,
 } from '../services/authService';
 
@@ -26,6 +26,7 @@ interface AuthState {
   resetOtpState: () => void;
   sendOtpCode: (phone: string, role: UserRole) => Promise<boolean>;
   confirmOtpCode: (code: string, role: UserRole, extra?: { name?: string; usn?: string; room?: string; hostel?: string }) => Promise<boolean>;
+  completeProfile: (data: { name: string; room: string; hostel?: string; usn?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   setUser: (user: AppUser | null) => void;
   clearError: () => void;
@@ -97,6 +98,24 @@ export const useAuthStore = create<AuthState>()(
       logout: async () => {
         await logoutUser();
         set({ user: null, isAuthenticated: false, otpSent: false, confirmationResult: null, error: null });
+      },
+
+      completeProfile: async (data) => {
+        const { user } = get();
+        if (!user?.uid) {
+          set({ error: 'Not authenticated.' });
+          return false;
+        }
+        set({ otpLoading: true, error: null });
+        try {
+          const updated = await saveUserProfile(user.uid, data);
+          set({ user: updated, otpLoading: false });
+          return true;
+        } catch (err: any) {
+          console.error('[Auth] Failed to save profile:', err);
+          set({ error: err.message || 'Failed to save profile. Please try again.', otpLoading: false });
+          return false;
+        }
       },
 
       initAuthListener: () => {

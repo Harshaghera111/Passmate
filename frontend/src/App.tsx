@@ -6,6 +6,7 @@ import ProtectedRoute from './routes/ProtectedRoute';
 
 // Public pages
 import LoginPage from './pages/LoginPage';
+import CompleteProfilePage from './pages/CompleteProfilePage';
 import ParentApprovalPage from './pages/parent/ParentApprovalPage';
 
 // Student
@@ -42,6 +43,9 @@ const App: React.FC = () => {
         {/* ── Public routes ── */}
         <Route path="/login" element={<LoginPage />} />
         <Route path="/login/:role" element={<LoginPage />} />
+
+        {/* Profile completion — semi-public: authenticated but profile not yet done */}
+        <Route path="/complete-profile" element={<CompleteProfilePage />} />
 
         {/* Parent magic-link approval (no auth required) */}
         <Route path="/parent/approve/:id" element={<ParentApprovalPage />} />

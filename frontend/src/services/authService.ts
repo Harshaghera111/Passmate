@@ -21,6 +21,8 @@ export interface AppUser {
   room?: string;
   hostel?: string;
   createdAt?: Date;
+  /** true when the user has completed their profile (name + room) */
+  profileComplete?: boolean;
 }
 
 // Module-level singleton — one verifier per page lifetime
@@ -115,18 +117,22 @@ export async function verifyOTP(
   const snap    = await getDoc(userRef);
 
   if (!snap.exists()) {
-    await setDoc(userRef, {
+    // Brand-new user — write minimal profile, mark incomplete
+    const newProfile = {
       uid,
       phone,
       role,
       ...extra,
+      profileComplete: false,
       createdAt: serverTimestamp(),
-    });
-    return { uid, phone, role, ...extra, createdAt: new Date() };
+    };
+    await setDoc(userRef, newProfile);
+    return { uid, phone, role, ...extra, profileComplete: false, createdAt: new Date() };
   }
 
   // Existing user — return stored profile (don't overwrite role)
-  return { uid, phone, ...snap.data() } as AppUser;
+  const data = snap.data();
+  return { uid, phone, ...data, profileComplete: data.profileComplete ?? !!data.name } as AppUser;
 }
 
 /**
@@ -135,7 +141,30 @@ export async function verifyOTP(
 export async function fetchUserProfile(uid: string): Promise<AppUser | null> {
   const snap = await getDoc(doc(db, 'users', uid));
   if (!snap.exists()) return null;
-  return { uid, ...snap.data() } as AppUser;
+  const data = snap.data();
+  return { uid, ...data, profileComplete: data.profileComplete ?? !!data.name } as AppUser;
+}
+
+/**
+ * Save completed profile data for a user (called from CompleteProfilePage).
+ * Marks profileComplete = true so the app stops redirecting to /complete-profile.
+ */
+export async function saveUserProfile(
+  uid: string,
+  data: { name: string; room: string; hostel?: string; usn?: string }
+): Promise<AppUser> {
+  const userRef = doc(db, 'users', uid);
+  const snap = await getDoc(userRef);
+  if (!snap.exists()) throw new Error('User document not found.');
+
+  const updateData = {
+    ...data,
+    profileComplete: true,
+  };
+  await setDoc(userRef, updateData, { merge: true });
+
+  const updated = { ...snap.data(), ...updateData };
+  return { uid, ...updated } as AppUser;
 }
 
 /**
