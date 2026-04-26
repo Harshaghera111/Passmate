@@ -139,15 +139,17 @@ export function subscribeStudentPasses(
 
   const q = query(
     collection(db, 'passes'),
-    where('studentId', '==', studentId),
-    orderBy('createdAt', 'desc')
+    where('studentId', '==', studentId)
   );
 
   return onSnapshot(
     q,
     (snap) => {
       console.log('[passService] Snapshot received. Docs:', snap.docs.length);
-      onChange(snap.docs.map(fromDoc));
+      const docs = snap.docs.map(fromDoc);
+      // Sort locally to avoid needing a Firestore composite index
+      docs.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      onChange(docs);
     },
     (err) => {
       console.error('[passService] onSnapshot error:', err.code, err.message);
