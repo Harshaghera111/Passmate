@@ -1,3 +1,5 @@
+A smart pass management system for students and wardens to streamline request approvals, tracking, and campus movement efficiently.
+
 # PassMate 🎓
 
 **Smart Hostel Gate Pass Management System** — A full-stack SaaS application for Indian colleges to digitize the student gate pass process with role-based access, QR code exits, and real-time approval workflows.
