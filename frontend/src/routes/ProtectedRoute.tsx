@@ -7,7 +7,7 @@ import { Loader } from 'lucide-react';
 
 const ROLE_HOME: Record<UserRole, string> = {
   student: '/student/dashboard',
-  parent:  '/student/dashboard',
+  parent:  '/parent/approve',
   warden:  '/warden/dashboard',
   guard:   '/guard/home',
   admin:   '/admin/dashboard',

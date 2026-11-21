@@ -87,11 +87,13 @@ const LoginPage: React.FC = () => {
       name: name.trim() || undefined,
     });
     if (ok) {
+      const activeUser = useAuthStore.getState().user;
+      const targetRole = activeUser?.role || role;
       // First-time user: profile not yet complete → redirect to profile form
-      if (user?.profileComplete === false) {
+      if (activeUser?.profileComplete === false) {
         navigate('/complete-profile', { replace: true });
       } else {
-        navigate(ROLE_HOME[role] ?? '/student/dashboard', { replace: true });
+        navigate(ROLE_HOME[targetRole] ?? '/student/dashboard', { replace: true });
       }
     }
   };

@@ -9,6 +9,34 @@ service cloud.firestore {
     }
 
     /**
+     * Canonical whitelist of authorized demo phone numbers.
+     *
+     * CRITICAL SYNC & SECURITY REQUIREMENT:
+     * Must remain 1:1 synchronized with DEMO_PHONES in authService.ts.
+     * Stored in E.164 format matching the Firebase Auth cryptographically signed
+     * token claim `request.auth.token.phone_number`.
+     * Client-side environment variables alone CANNOT grant demo privileges in Firestore.
+     */
+    function isDemoCaller() {
+      return isSignedIn() && (
+        request.auth.token.phone_number in [
+          '+917620981982',  // Primary demo test phone
+          '+919845012345',  // Seed Student
+          '+919845001234',  // Seed Warden
+          '+919900012345',  // Seed Guard
+          '+919000000001'   // Seed Admin
+        ]
+      );
+    }
+
+    /**
+     * Helper to validate that a role string is one of the supported system roles.
+     */
+    function isValidRole(role) {
+      return role in ['student', 'warden', 'guard', 'admin', 'parent'];
+    }
+
+    /**
      * Safely fetch the caller's role from their Firestore user document.
      * Returns 'unknown' when the document does not exist, preventing crashes
      * caused by missing user profiles (e.g. first-time OTP login).
@@ -34,14 +62,44 @@ service cloud.firestore {
     // ── /users/{uid} ──────────────────────────────────────────────────────────
 
     match /users/{uid} {
-      // Own profile: always readable/writable by the user themselves.
+      // Own profile: always readable by the user themselves, or by warden/admin
       allow read:   if isSignedIn() && (
                       request.auth.uid == uid ||
                       userRole() == 'warden'  ||
                       userRole() == 'admin'
                     );
-      allow create: if isSignedIn() && request.auth.uid == uid;
-      allow update: if isSignedIn() && request.auth.uid == uid;
+
+      // Creation security:
+      // 1. Caller must be signed in as uid.
+      // 2. Role must be a valid system role.
+      // 3. Demo phone numbers can create any role (student, warden, guard, admin, parent) and set isDemo: true.
+      // 4. Production users can only create student or parent accounts and cannot set isDemo: true.
+      allow create: if isSignedIn() && request.auth.uid == uid
+                    && isValidRole(request.resource.data.get('role', 'student'))
+                    && (
+                      isDemoCaller() || (
+                        request.resource.data.get('role', 'student') in ['student', 'parent'] &&
+                        request.resource.data.get('isDemo', false) == false
+                      )
+                    );
+
+      // Update security:
+      // 1. Caller must be signed in as uid.
+      // 2. Demo phone numbers: role must be valid, and updates restricted to known user schema fields.
+      // 3. Production users: CANNOT modify protected fields ('role', 'isDemo', 'roleProfiles').
+      //    Ensures isDemo cannot be self-assigned or flipped by unauthorized accounts.
+      allow update: if isSignedIn() && request.auth.uid == uid && (
+                      (
+                        isDemoCaller() &&
+                        isValidRole(request.resource.data.get('role', 'student')) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                          'role', 'name', 'usn', 'room', 'hostel', 'profileComplete',
+                          'roleProfiles', 'updatedAt', 'createdAt', 'isDemo', 'phone', 'uid'
+                        ])
+                      ) || (
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isDemo', 'roleProfiles'])
+                      )
+                    );
       allow delete: if false;
     }
 

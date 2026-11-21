@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
-import { CheckCircle2, XCircle, Clock, ShieldCheck, Loader, AlertCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, ShieldCheck, Loader, AlertCircle, LogOut } from 'lucide-react';
 import { getPass, parentApprove, type GatePass } from '../../services/passService';
+import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 
 const ParentApprovalPage: React.FC = () => {
   const { id: paramId } = useParams();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const passId = paramId || searchParams.get('id') || '';
 
+  const { isAuthenticated, logout } = useAuthStore();
   const [pass, setPass]         = useState<GatePass | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [actionDone, setActionDone] = useState(false);
@@ -23,6 +26,11 @@ const ParentApprovalPage: React.FC = () => {
       .catch(() => {})
       .finally(() => setIsLoading(false));
   }, [passId]);
+
+  const handleLogout = async () => {
+    await logout();
+    navigate('/login');
+  };
 
   const handleDecision = async (approve: boolean) => {
     if (!passId || !pass) return;
@@ -47,6 +55,59 @@ const ParentApprovalPage: React.FC = () => {
     );
   }
 
+  // ── Authenticated Parent Portal empty state (no passId in URL) ─────────────
+  if (!passId) {
+    return (
+      <div className="min-h-screen bg-bg-base flex items-center justify-center p-4">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl shadow-blue-900/10 border border-border overflow-hidden text-center">
+          <div className="bg-gradient-hero p-8 text-white relative overflow-hidden">
+            <div className="absolute inset-0 bg-white/5 rounded-full blur-3xl scale-150" />
+            <div className="relative z-10">
+              <ShieldCheck size={48} className="mx-auto mb-3 drop-shadow-md text-emerald-300" />
+              <h1 className="text-2xl font-black font-sora">Parent Portal</h1>
+              <p className="text-blue-100 text-sm mt-1">PassMate Gate Pass Approvals</p>
+            </div>
+          </div>
+          <div className="p-8 space-y-5">
+            <div className="w-16 h-16 bg-blue-50 text-accent-primary rounded-2xl flex items-center justify-center mx-auto border border-blue-100">
+              <Clock size={32} />
+            </div>
+            <div>
+              <h2 className="text-xl font-bold font-sora text-text-primary">No Active Pass Request</h2>
+              <p className="text-text-muted text-sm mt-2 leading-relaxed">
+                Welcome to PassMate! When your student submits a new gate pass request, you will automatically receive an SMS notification with a direct approval link.
+              </p>
+            </div>
+            <div className="p-4 bg-bg-muted rounded-2xl border border-border text-xs text-text-secondary text-left space-y-1.5">
+              <p className="font-semibold text-text-primary">How approvals work:</p>
+              <p>1. Student creates an out-pass request.</p>
+              <p>2. You receive an SMS notification with a unique link.</p>
+              <p>3. Tap the link to instantly review and approve or decline.</p>
+            </div>
+            {isAuthenticated ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="btn btn-secondary w-full h-11 text-sm flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors"
+              >
+                <LogOut size={16} /> Sign Out
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="btn btn-primary w-full h-11 text-sm"
+              >
+                Go to Login
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Magic-link error state (passId present but document not found) ──────────
   if (!pass) {
     return (
       <div className="min-h-screen bg-bg-base flex flex-col items-center justify-center p-6 text-center">
