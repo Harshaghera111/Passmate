@@ -17,10 +17,11 @@ const GuardHome: React.FC = () => {
     navigate('/login');
   };
 
-  // ── Real-time stats from Firestore ────────────────────────────────────────
+  // ── Real-time stats from Firestore (scoped to guard's hostel) ────────────
   useEffect(() => {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
+    const hostelId = authUser?.hostel || undefined;
 
     const unsub = subscribeAllPasses((passes) => {
       const exits   = passes.filter(p => p.exitTime  && new Date(p.exitTime)  >= todayStart).length;
@@ -28,9 +29,9 @@ const GuardHome: React.FC = () => {
       setExitsToday(exits);
       setEntriesToday(entries);
       setIsLoading(false);
-    });
+    }, hostelId);
     return unsub;
-  }, []);
+  }, [authUser?.hostel]);
 
   return (
     <div className="min-h-[calc(100vh-80px)] flex flex-col page-enter pb-6 max-w-lg mx-auto">

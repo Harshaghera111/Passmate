@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db, uuidv4, log } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { getAdminDb } from '../firebaseAdmin.js';
 
 const router = Router();
 
@@ -94,12 +95,79 @@ router.post('/', authenticate, requireRole('student'), async (req, res) => {
   }
 });
 
+// Helper: Detect whether valid server-side Firebase Admin credentials are configured
+function hasFirebaseCredentials() {
+  return !!(
+    process.env.FIREBASE_SERVICE_ACCOUNT_KEY ||
+    (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) ||
+    process.env.GOOGLE_APPLICATION_CREDENTIALS ||
+    process.env.K_SERVICE ||
+    process.env.GAE_INSTANCE
+  );
+}
+
 // GET /api/passes/parent/:id — Unauthenticated route for parents
 router.get('/parent/:id', async (req, res) => {
   try {
     const { token } = req.query;
-    if (!token) return res.status(400).json({ error: 'Token required' });
+    if (!token) return res.status(400).json({ error: 'Approval token is required' });
 
+    const { id } = req.params;
+
+    // 1. Verify server credentials before attempting Cloud Firestore operations
+    if (!hasFirebaseCredentials()) {
+      // Allow legacy SQL passes only if record genuinely exists in SQL
+      try {
+        const legacyPass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
+        if (legacyPass) {
+          return res.json(await enrichPass(legacyPass));
+        }
+      } catch (_) {
+        // SQL table unavailable or query failed
+      }
+
+      console.error('[Firestore] Missing Firebase Admin credentials in server environment.');
+      return res.status(503).json({
+        error: 'Database service unavailable. Firebase Admin credentials are not configured on the server.',
+      });
+    }
+
+    // 2. Check Cloud Firestore (Primary source of truth)
+    try {
+      const adminDb = getAdminDb();
+      const passDoc = await adminDb.collection('passes').doc(id).get();
+      if (passDoc.exists) {
+        const passData = passDoc.data();
+
+        // Validate token
+        if (!passData.parentToken || passData.parentToken !== token) {
+          return res.status(403).json({ error: 'Invalid or missing approval token' });
+        }
+
+        return res.json({
+          id: passDoc.id,
+          studentName: passData.studentName ?? '',
+          usn: passData.usn ?? '',
+          room: passData.room ?? '',
+          hostel: passData.hostel ?? '',
+          reason: passData.reason ?? '',
+          reasonDetail: passData.reasonDetail ?? '',
+          outTime: passData.outTime?.toDate ? passData.outTime.toDate() : passData.outTime,
+          expectedReturn: passData.expectedReturn?.toDate ? passData.expectedReturn.toDate() : passData.expectedReturn,
+          status: passData.status,
+          parentApproved: passData.parentApproved,
+          parentApprovedAt: passData.parentApprovedAt?.toDate ? passData.parentApprovedAt.toDate() : passData.parentApprovedAt,
+          parentTokenUsed: !!passData.parentTokenUsed,
+        });
+      }
+    } catch (fsErr) {
+      console.error('[Firestore] GET /parent/:id infrastructure error:', fsErr.message);
+      return res.status(503).json({
+        error: 'Database service unavailable. Please check server database configuration.',
+      });
+    }
+
+    // 3. Fallback to SQL database ONLY when Firestore document genuinely does not exist (legacy records)
     const pass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
     if (!pass) return res.status(404).json({ error: 'Pass not found or invalid token' });
 
@@ -113,20 +181,153 @@ router.get('/parent/:id', async (req, res) => {
 router.patch('/:id/parent-approve', async (req, res) => {
   try {
     const { token, action, note } = req.body;
-    if (!token || !action) return res.status(400).json({ error: 'Token and action required' });
+    if (!token || !action) return res.status(400).json({ error: 'Token and action are required' });
+    if (!['approve', 'reject'].includes(action)) {
+      return res.status(400).json({ error: 'Action must be "approve" or "reject"' });
+    }
 
-    const pass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
-    if (!pass) return res.status(404).json({ error: 'Pass not found or invalid token' });
-    if (pass.parent_status !== 'pending') return res.status(409).json({ error: 'Already responded to' });
+    const { id } = req.params;
+    let isApprove = action === 'approve';
 
-    const now = new Date().toISOString();
-    const updates = { parent_status: action === 'approve' ? 'approved' : 'rejected', parent_approved_at: now, updated_at: now };
-    if (action === 'reject') { updates.status = 'rejected'; updates.warden_note = note || 'Rejected by parent'; }
+    // 1. Verify server credentials before attempting Cloud Firestore operations
+    if (!hasFirebaseCredentials()) {
+      // Allow legacy SQL passes only if record genuinely exists in SQL
+      try {
+        const legacyPass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
+        if (legacyPass) {
+          if (legacyPass.parent_status !== 'pending') return res.status(409).json({ error: 'Already responded to' });
 
-    await db('gate_passes').where('id', pass.id).update(updates);
-    await log(null, 'Parent', 'parent', `PARENT_${action.toUpperCase()}`, pass.id, 'gate_pass', req.ip);
+          const now = new Date().toISOString();
+          const updates = { parent_status: isApprove ? 'approved' : 'rejected', parent_approved_at: now, updated_at: now };
+          if (!isApprove) { updates.status = 'rejected'; updates.warden_note = note || 'Rejected by parent'; }
 
-    res.json({ success: true, message: `Pass ${action === 'approve' ? 'approved' : 'rejected'} by parent` });
+          await db('gate_passes').where('id', legacyPass.id).update(updates);
+          await log(null, 'Parent', 'parent', `PARENT_${action.toUpperCase()}`, legacyPass.id, 'gate_pass', req.ip);
+
+          return res.json({ success: true, message: `Pass ${isApprove ? 'approved' : 'rejected'} by parent` });
+        }
+      } catch (_) {
+        // SQL table unavailable or query failed
+      }
+
+      console.error('[Firestore] Missing Firebase Admin credentials in server environment.');
+      return res.status(503).json({
+        error: 'Database service unavailable. Firebase Admin credentials are not configured on the server.',
+      });
+    }
+
+    // 2. Primary: Update Firestore pass via Firebase Admin SDK
+    let handledByFirestore = false;
+    try {
+      const adminDb = getAdminDb();
+      const passRef = adminDb.collection('passes').doc(id);
+
+      const txResult = await adminDb.runTransaction(async (transaction) => {
+        const passDoc = await transaction.get(passRef);
+        if (!passDoc.exists) return null;
+
+        const passData = passDoc.data();
+
+        // Validate token
+        if (!passData.parentToken || passData.parentToken !== token) {
+          throw { status: 403, message: 'Invalid or missing approval token' };
+        }
+
+        // Reject previously used tokens
+        if (passData.parentTokenUsed || passData.parentApproved !== null) {
+          throw { status: 409, message: 'This pass has already been responded to' };
+        }
+
+        // Prevent approval of passes that are no longer pending
+        if (passData.status !== 'pending') {
+          throw { status: 400, message: `Pass is no longer pending (current status: "${passData.status}")` };
+        }
+
+        // Expiration check
+        const expectedReturn = passData.expectedReturn?.toDate
+          ? passData.expectedReturn.toDate()
+          : (passData.expectedReturn ? new Date(passData.expectedReturn) : null);
+        if (expectedReturn && new Date() > expectedReturn) {
+          throw { status: 410, message: 'This gate pass request has expired' };
+        }
+
+        const now = new Date();
+        const updateData = {
+          parentApproved: isApprove,
+          parentApprovedAt: now,
+          parentTokenUsed: true,
+          status: isApprove ? 'parent_approved' : 'parent_rejected',
+          updatedAt: now,
+        };
+        if (!isApprove && note) {
+          updateData.parentNote = note;
+        }
+
+        transaction.update(passRef, updateData);
+        return { success: true, studentId: passData.studentId };
+      });
+
+      if (txResult) {
+        handledByFirestore = true;
+
+        // Record audit log in Firestore
+        try {
+          await adminDb.collection('audit_logs').add({
+            action: isApprove ? 'parent_approved' : 'parent_rejected',
+            passId: id,
+            actorId: 'parent',
+            actorRole: 'parent',
+            timestamp: new Date(),
+            meta: { note: note || null },
+          });
+        } catch (auditErr) {
+          console.warn('[audit] Failed to write audit log from backend:', auditErr.message);
+        }
+
+        // Optional SQL sync if pass exists in SQL table
+        try {
+          const sqlPass = await db('gate_passes').where('id', id).first();
+          if (sqlPass) {
+            const now = new Date().toISOString();
+            await db('gate_passes').where('id', id).update({
+              parent_status: isApprove ? 'approved' : 'rejected',
+              parent_approved_at: now,
+              status: isApprove ? sqlPass.status : 'rejected',
+              updated_at: now,
+            });
+          }
+        } catch (_) {}
+
+        return res.json({
+          success: true,
+          message: `Pass ${isApprove ? 'approved' : 'rejected'} by parent`,
+        });
+      }
+    } catch (fsErr) {
+      if (fsErr.status) {
+        return res.status(fsErr.status).json({ error: fsErr.message });
+      }
+      console.error('[Firestore] PATCH /parent-approve infrastructure error:', fsErr.message);
+      return res.status(503).json({
+        error: 'Database service unavailable. Please check server database configuration.',
+      });
+    }
+
+    // 3. Fallback to SQL database ONLY if pass genuinely did not exist in Firestore (legacy records)
+    if (!handledByFirestore) {
+      const pass = await db('gate_passes').where({ id: req.params.id, parent_token: token }).first();
+      if (!pass) return res.status(404).json({ error: 'Pass not found or invalid token' });
+      if (pass.parent_status !== 'pending') return res.status(409).json({ error: 'Already responded to' });
+
+      const now = new Date().toISOString();
+      const updates = { parent_status: isApprove ? 'approved' : 'rejected', parent_approved_at: now, updated_at: now };
+      if (!isApprove) { updates.status = 'rejected'; updates.warden_note = note || 'Rejected by parent'; }
+
+      await db('gate_passes').where('id', pass.id).update(updates);
+      await log(null, 'Parent', 'parent', `PARENT_${action.toUpperCase()}`, pass.id, 'gate_pass', req.ip);
+
+      return res.json({ success: true, message: `Pass ${isApprove ? 'approved' : 'rejected'} by parent` });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

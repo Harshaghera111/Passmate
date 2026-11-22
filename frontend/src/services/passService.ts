@@ -35,6 +35,8 @@ export interface GatePass {
   // Parent approval
   parentApproved: boolean | null;
   parentApprovedAt?: Date;
+  parentToken?: string;
+  parentTokenUsed?: boolean;
 
   // Warden approval — audit trail
   wardenApproved: boolean | null;
@@ -134,16 +136,24 @@ export async function createPass(data: {
   expectedReturn: Date;
 }): Promise<string> {
   try {
+    const parentToken = crypto.randomUUID();
     const ref = await addDoc(collection(db, 'passes'), {
       ...data,
       outTime:        Timestamp.fromDate(data.outTime),
       expectedReturn: Timestamp.fromDate(data.expectedReturn),
       status:         'pending' as PassStatus,
       parentApproved: null,
+      parentToken,
+      parentTokenUsed: false,
       wardenApproved: null,
       qrData:         null,
       createdAt:      serverTimestamp(),
     });
+
+    const approvalUrl = typeof window !== 'undefined'
+      ? `${window.location.origin}/parent/approve/${ref.id}?token=${parentToken}`
+      : `/parent/approve/${ref.id}?token=${parentToken}`;
+    console.log(`[PassMate] 📨 Parent approval link: ${approvalUrl}`);
 
     await writeAuditLog('pass_created', ref.id, data.studentId, 'student', {
       reason: data.reason,
@@ -154,6 +164,16 @@ export async function createPass(data: {
     console.error('[passService] createPass failed:', err);
     throw new Error(friendlyError(err, 'Failed to submit pass request.'));
   }
+}
+
+/**
+ * Returns the parent magic-link URL with the pass token.
+ */
+export function getParentApprovalUrl(pass: { id: string; parentToken?: string }): string {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return pass.parentToken
+    ? `${origin}/parent/approve/${pass.id}?token=${pass.parentToken}`
+    : `${origin}/parent/approve/${pass.id}`;
 }
 
 /**

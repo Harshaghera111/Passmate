@@ -3,6 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { CheckCircle2, XCircle, Clock, ShieldCheck, Loader, AlertCircle, LogOut } from 'lucide-react';
 import { getPass, parentApprove, type GatePass } from '../../services/passService';
+import { passApi } from '../../lib/api';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 
@@ -11,6 +12,7 @@ const ParentApprovalPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const passId = paramId || searchParams.get('id') || '';
+  const token = searchParams.get('token') || '';
 
   const { isAuthenticated, logout } = useAuthStore();
   const [pass, setPass]         = useState<GatePass | null>(null);
@@ -21,11 +23,33 @@ const ParentApprovalPage: React.FC = () => {
 
   useEffect(() => {
     if (!passId) { setIsLoading(false); return; }
-    getPass(passId)
-      .then(p => setPass(p))
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
-  }, [passId]);
+
+    if (token) {
+      // Secure token-based approval via backend API (no Firestore authentication required)
+      passApi.getParentPass(passId, token)
+        .then((p: any) => {
+          setPass({
+            ...p,
+            outTime: p.outTime ? new Date(p.outTime) : new Date(),
+            expectedReturn: p.expectedReturn ? new Date(p.expectedReturn) : new Date(),
+            parentApprovedAt: p.parentApprovedAt ? new Date(p.parentApprovedAt) : undefined,
+            createdAt: p.createdAt ? new Date(p.createdAt) : new Date(),
+          } as GatePass);
+        })
+        .catch((err) => {
+          console.warn('[ParentApprovalPage] Failed to fetch pass via token:', err.message);
+        })
+        .finally(() => setIsLoading(false));
+    } else if (isAuthenticated) {
+      // Authenticated parent portal view
+      getPass(passId)
+        .then(p => setPass(p))
+        .catch(() => {})
+        .finally(() => setIsLoading(false));
+    } else {
+      setIsLoading(false);
+    }
+  }, [passId, token, isAuthenticated]);
 
   const handleLogout = async () => {
     await logout();
@@ -36,7 +60,15 @@ const ParentApprovalPage: React.FC = () => {
     if (!passId || !pass) return;
     setActionLoading(true);
     try {
-      await parentApprove(passId, approve);
+      if (token) {
+        // Validated server-side with single-use token via backend
+        await passApi.parentApprove(passId, token, approve ? 'approve' : 'reject');
+      } else if (isAuthenticated) {
+        // Authenticated parent update
+        await parentApprove(passId, approve);
+      } else {
+        throw new Error('Approval token is missing. Please use the secure link sent via SMS.');
+      }
       setDecision(approve ? 'approved' : 'rejected');
       setActionDone(true);
       toast.success(approve ? 'Pass approved by parent!' : 'Pass rejected by parent.');
