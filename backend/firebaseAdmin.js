@@ -2,6 +2,7 @@
 import admin from 'firebase-admin';
 import { cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
 
 let isInitialized = false;
 
@@ -62,6 +63,14 @@ export function getAdminDb() {
   }
 
   return getFirestore();
+}
+
+/**
+ * Returns an initialized Auth Admin instance.
+ */
+export function getAdminAuth() {
+  getAdminDb(); // ensures Firebase app is initialized
+  return getAuth();
 }
 
 export default admin;

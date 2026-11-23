@@ -18,6 +18,7 @@ export interface RoleProfile {
   usn?: string;
   room?: string;
   hostel?: string;
+  parentEmail?: string;
   profileComplete: boolean;
 }
 
@@ -30,6 +31,7 @@ export interface AppUser {
   usn?: string;
   room?: string;
   hostel?: string;
+  parentEmail?: string;
   createdAt?: Date;
   /** true when the user has completed their profile (name + room) */
   profileComplete?: boolean;
@@ -65,6 +67,7 @@ export const DEFAULT_DEMO_PROFILES: Record<UserRole, RoleProfile> = {
     usn: '1DS22CS042',
     room: 'A-204',
     hostel: 'Cauvery Boys Hostel',
+    parentEmail: 'parent.demo@passmate.dev',
     profileComplete: true,
   },
   warden: {
@@ -213,6 +216,7 @@ export async function verifyOTP(
       usn: activeProfile.usn || null,
       room: activeProfile.room || null,
       hostel: activeProfile.hostel || null,
+      parentEmail: activeProfile.parentEmail || null,
       profileComplete: activeProfile.profileComplete ?? true,
       roleProfiles,
       updatedAt: serverTimestamp(),
@@ -230,6 +234,7 @@ export async function verifyOTP(
       usn: activeProfile.usn,
       room: activeProfile.room,
       hostel: activeProfile.hostel,
+      parentEmail: activeProfile.parentEmail,
       profileComplete: activeProfile.profileComplete,
       createdAt: existingData?.createdAt?.toDate ? existingData.createdAt.toDate() : new Date(),
     } as AppUser;
@@ -289,7 +294,7 @@ export async function fetchUserProfile(uid: string): Promise<AppUser | null> {
  */
 export async function saveUserProfile(
   uid: string,
-  data: { name: string; room: string; hostel?: string; usn?: string }
+  data: { name: string; room: string; hostel?: string; usn?: string; parentEmail?: string }
 ): Promise<AppUser> {
   const userRef = doc(db, 'users', uid);
   const snap = await getDoc(userRef);
@@ -310,6 +315,7 @@ export async function saveUserProfile(
     updateData[`roleProfiles.${currentRole}.room`] = data.room;
     if (data.hostel) updateData[`roleProfiles.${currentRole}.hostel`] = data.hostel;
     if (data.usn) updateData[`roleProfiles.${currentRole}.usn`] = data.usn;
+    if (data.parentEmail) updateData[`roleProfiles.${currentRole}.parentEmail`] = data.parentEmail;
     updateData[`roleProfiles.${currentRole}.profileComplete`] = true;
   }
 

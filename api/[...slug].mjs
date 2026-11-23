@@ -76,7 +76,8 @@ const passSqlGuard = (req, res, next) => {
   const url = req.originalUrl || req.path || '';
   const isFirestoreRoute =
     url.includes('/parent/') ||
-    url.includes('/parent-approve');
+    url.includes('/parent-approve') ||
+    url.includes('/parent-token');
 
   if (!isFirestoreRoute && !sqlAvailable) {
     return res.status(503).json({

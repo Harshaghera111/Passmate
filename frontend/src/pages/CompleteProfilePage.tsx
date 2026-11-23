@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Home, BookOpen, QrCode, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { User, Home, BookOpen, QrCode, AlertCircle, CheckCircle2, Mail } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { ROLE_HOME } from '../routes/ProtectedRoute';
 
@@ -17,18 +17,25 @@ const CompleteProfilePage: React.FC = () => {
   const [room,   setRoom]   = useState('');
   const [hostel, setHostel] = useState('');
   const [usn,    setUsn]    = useState('');
+  const [parentEmail, setParentEmail] = useState(user?.parentEmail || '');
+
+  const isStudent = user?.role === 'student' || !user?.role;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const isParentEmailValid = !isStudent || emailRegex.test(parentEmail.trim());
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
 
     if (!name.trim() || !room.trim() || !hostel) return;
+    if (isStudent && !emailRegex.test(parentEmail.trim())) return;
 
     const ok = await completeProfile({
-      name:   name.trim(),
-      room:   room.trim(),
-      hostel: hostel || undefined,
-      usn:    usn.trim() || undefined,
+      name:        name.trim(),
+      room:        room.trim(),
+      hostel:      hostel || undefined,
+      usn:         usn.trim() || undefined,
+      parentEmail: isStudent ? parentEmail.trim().toLowerCase() : undefined,
     });
 
     if (ok && user) {
@@ -141,6 +148,30 @@ const CompleteProfilePage: React.FC = () => {
               </div>
             )}
 
+            {/* Parent / Guardian Email — required for students */}
+            {isStudent && (
+              <div className="float-label-group">
+                <div className="relative">
+                  <Mail size={15} className="absolute left-3 top-[22px] text-text-muted z-10 pointer-events-none" />
+                  <input
+                    id="profile-parent-email"
+                    type="email"
+                    placeholder=" "
+                    value={parentEmail}
+                    onChange={e => setParentEmail(e.target.value)}
+                    className="pl-9"
+                    required
+                  />
+                  <label htmlFor="profile-parent-email" className="pl-9">Parent / Guardian Email *</label>
+                </div>
+                {parentEmail.trim() && !emailRegex.test(parentEmail.trim()) && (
+                  <p className="mt-1 text-xs text-red-500 flex items-center gap-1">
+                    <AlertCircle size={12} /> Enter a valid email address.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Progress visual */}
             <div className="bg-bg-muted rounded-xl p-4 space-y-2">
               <p className="text-xs font-semibold text-text-muted uppercase tracking-wider">Profile Completion</p>
@@ -150,6 +181,7 @@ const CompleteProfilePage: React.FC = () => {
                   !!room.trim(),
                   !!hostel,
                   !!(user?.role === 'student' && usn.trim()),
+                  ...(isStudent ? [emailRegex.test(parentEmail.trim())] : []),
                 ].map((done, i) => (
                   <div
                     key={i}
@@ -161,7 +193,7 @@ const CompleteProfilePage: React.FC = () => {
 
             <button
               type="submit"
-              disabled={otpLoading || !name.trim() || !room.trim() || !hostel}
+              disabled={otpLoading || !name.trim() || !room.trim() || !hostel || !isParentEmailValid}
               className="btn btn-primary w-full h-12 text-[15px] disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {otpLoading ? (

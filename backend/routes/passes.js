@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, uuidv4, log } from '../db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { getAdminDb } from '../firebaseAdmin.js';
+import { getAdminDb, getAdminAuth } from '../firebaseAdmin.js';
 
 const router = Router();
 
@@ -106,6 +106,93 @@ function hasFirebaseCredentials() {
   );
 }
 
+// POST /api/passes/:id/parent-token — Authenticated student generates / rotates parent approval token
+router.post('/:id/parent-token', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Verify server credentials before attempting Cloud Firestore operations
+    if (!hasFirebaseCredentials()) {
+      return res.status(503).json({
+        error: 'Database service unavailable. Firebase Admin credentials are not configured on the server.',
+      });
+    }
+
+    // 2. Authenticate requesting student using Firebase Admin Auth
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Missing or invalid authorization header' });
+    }
+
+    const idToken = authHeader.split(' ')[1];
+    let decodedUser;
+    try {
+      const adminAuth = getAdminAuth();
+      decodedUser = await adminAuth.verifyIdToken(idToken);
+    } catch (authErr) {
+      return res.status(401).json({ error: 'Authentication failed: Invalid or expired Firebase token' });
+    }
+
+    // 3. Retrieve pass document from Firestore
+    const adminDb = getAdminDb();
+    const passRef = adminDb.collection('passes').doc(id);
+    const passDoc = await passRef.get();
+
+    if (!passDoc.exists) {
+      return res.status(404).json({ error: 'Pass not found' });
+    }
+
+    const passData = passDoc.data();
+
+    // 4. Verify student ownership
+    if (passData.studentId !== decodedUser.uid) {
+      return res.status(403).json({ error: 'Forbidden: You are not authorized to manage tokens for this pass' });
+    }
+
+    // 5. Ensure pass is in a state eligible for parent approval
+    if (!['pending', 'parent_rejected'].includes(passData.status)) {
+      return res.status(400).json({
+        error: `Cannot generate parent token: Pass is currently "${passData.status}" (must be "pending")`,
+      });
+    }
+
+    // 6. Generate UUID token and securely store/rotate in pass_secrets/{passId}
+    const parentToken = uuidv4();
+    const now = new Date();
+    const secretRef = adminDb.collection('pass_secrets').doc(id);
+
+    await secretRef.set({
+      passId: id,
+      parentToken,
+      parentTokenUsed: false,
+      studentId: decodedUser.uid,
+      createdAt: now,
+      rotatedAt: now,
+    });
+
+    // 7. Remove any legacy parentToken stored directly on the pass document
+    if (passData.parentToken) {
+      await passRef.update({
+        parentToken: null,
+      }).catch(err => console.warn('[passes] Notice: Could not clear legacy token on pass doc:', err.message));
+    }
+
+    const origin = req.get('origin') || process.env.APP_URL || 'http://localhost:5173';
+    const parentApprovalUrl = `${origin}/parent/approve/${id}?token=${parentToken}`;
+
+    return res.status(201).json({
+      success: true,
+      passId: id,
+      parentToken,
+      parentApprovalUrl,
+      message: 'Parent approval token generated and stored in pass_secrets securely',
+    });
+  } catch (err) {
+    console.error('[passes] POST /:id/parent-token error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/passes/parent/:id — Unauthenticated route for parents
 router.get('/parent/:id', async (req, res) => {
   try {
@@ -135,12 +222,26 @@ router.get('/parent/:id', async (req, res) => {
     // 2. Check Cloud Firestore (Primary source of truth)
     try {
       const adminDb = getAdminDb();
-      const passDoc = await adminDb.collection('passes').doc(id).get();
+      const passRef = adminDb.collection('passes').doc(id);
+      const secretRef = adminDb.collection('pass_secrets').doc(id);
+
+      const [passDoc, secretDoc] = await Promise.all([
+        passRef.get(),
+        secretRef.get(),
+      ]);
+
       if (passDoc.exists) {
         const passData = passDoc.data();
+        const secretData = secretDoc.exists ? secretDoc.data() : null;
+
+        // Token resolution: check pass_secrets first, fallback to legacy passDoc for backward compatibility
+        const expectedToken = secretData?.parentToken || passData.parentToken;
+        const isTokenUsed = secretData
+          ? secretData.parentTokenUsed
+          : (passData.parentTokenUsed || passData.parentApproved !== null);
 
         // Validate token
-        if (!passData.parentToken || passData.parentToken !== token) {
+        if (!expectedToken || expectedToken !== token) {
           return res.status(403).json({ error: 'Invalid or missing approval token' });
         }
 
@@ -157,7 +258,7 @@ router.get('/parent/:id', async (req, res) => {
           status: passData.status,
           parentApproved: passData.parentApproved,
           parentApprovedAt: passData.parentApprovedAt?.toDate ? passData.parentApprovedAt.toDate() : passData.parentApprovedAt,
-          parentTokenUsed: !!passData.parentTokenUsed,
+          parentTokenUsed: !!isTokenUsed,
         });
       }
     } catch (fsErr) {
@@ -216,25 +317,34 @@ router.patch('/:id/parent-approve', async (req, res) => {
       });
     }
 
-    // 2. Primary: Update Firestore pass via Firebase Admin SDK
+    // 2. Primary: Update Firestore pass and pass_secrets via Firebase Admin SDK transaction
     let handledByFirestore = false;
     try {
       const adminDb = getAdminDb();
       const passRef = adminDb.collection('passes').doc(id);
+      const secretRef = adminDb.collection('pass_secrets').doc(id);
 
       const txResult = await adminDb.runTransaction(async (transaction) => {
         const passDoc = await transaction.get(passRef);
         if (!passDoc.exists) return null;
 
+        const secretDoc = await transaction.get(secretRef);
         const passData = passDoc.data();
+        const secretData = secretDoc.exists ? secretDoc.data() : null;
+
+        // Token resolution: check pass_secrets first, fallback to legacy passDoc
+        const expectedToken = secretData?.parentToken || passData.parentToken;
+        const isTokenUsed = secretData
+          ? secretData.parentTokenUsed
+          : (passData.parentTokenUsed || passData.parentApproved !== null);
 
         // Validate token
-        if (!passData.parentToken || passData.parentToken !== token) {
+        if (!expectedToken || expectedToken !== token) {
           throw { status: 403, message: 'Invalid or missing approval token' };
         }
 
         // Reject previously used tokens
-        if (passData.parentTokenUsed || passData.parentApproved !== null) {
+        if (isTokenUsed || passData.parentApproved !== null) {
           throw { status: 409, message: 'This pass has already been responded to' };
         }
 
@@ -255,12 +365,22 @@ router.patch('/:id/parent-approve', async (req, res) => {
         const updateData = {
           parentApproved: isApprove,
           parentApprovedAt: now,
-          parentTokenUsed: true,
           status: isApprove ? 'parent_approved' : 'parent_rejected',
           updatedAt: now,
         };
         if (!isApprove && note) {
           updateData.parentNote = note;
+        }
+
+        // Atomically consume token in pass_secrets if document exists
+        if (secretDoc.exists) {
+          transaction.update(secretRef, {
+            parentTokenUsed: true,
+            usedAt: now,
+          });
+        } else {
+          // Legacy pass compatibility: update field on passDoc
+          updateData.parentTokenUsed = true;
         }
 
         transaction.update(passRef, updateData);

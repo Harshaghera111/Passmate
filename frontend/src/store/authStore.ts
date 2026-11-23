@@ -26,7 +26,7 @@ interface AuthState {
   resetOtpState: () => void;
   sendOtpCode: (phone: string, role: UserRole) => Promise<boolean>;
   confirmOtpCode: (code: string, role: UserRole, extra?: { name?: string; usn?: string; room?: string; hostel?: string }) => Promise<boolean>;
-  completeProfile: (data: { name: string; room: string; hostel?: string; usn?: string }) => Promise<boolean>;
+  completeProfile: (data: { name: string; room: string; hostel?: string; usn?: string; parentEmail?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   setUser: (user: AppUser | null) => void;
   clearError: () => void;

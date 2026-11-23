@@ -94,7 +94,8 @@ service cloud.firestore {
                         isValidRole(request.resource.data.get('role', 'student')) &&
                         request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                           'role', 'name', 'usn', 'room', 'hostel', 'profileComplete',
-                          'roleProfiles', 'updatedAt', 'createdAt', 'isDemo', 'phone', 'uid'
+                          'roleProfiles', 'updatedAt', 'createdAt', 'isDemo', 'phone', 'uid',
+                          'parentEmail'
                         ])
                       ) || (
                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isDemo', 'roleProfiles'])
